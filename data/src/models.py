@@ -21,7 +21,9 @@ class Task(BaseModel):
 class Engineer(BaseModel):
     name: str  # 必填
     skills: list[str] = Field(default_factory=list)
-    current_load: int = 0 #  当前手上有几个任务
+    mobile: str = ""  # 手机号，用于钉钉群 @ 提及
+    dingtalk_user_id: str = ""  # 钉钉 UserId，用于私聊消息推送
+    current_load: int = 0  # 当前手上有几个任务
     available: bool = True  # 是否在岗
 
 

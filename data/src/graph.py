@@ -277,23 +277,138 @@ def assign_node(state: AgentState) -> dict:
     }
 
 
+# ==================== 钉钉 API 辅助函数 ====================
+
+# 缓存 access token，避免每次通知都重新获取
+_dingtalk_token_cache: dict = {"token": "", "expires_at": 0}
+
+
+def _get_dingtalk_access_token() -> str:
+    """
+    获取钉钉 Open API 的 access_token。
+    使用 AppKey 和 AppSecret 换取，token 有效期内复用缓存。
+    """
+    import time as _time
+
+    now = _time.time()
+    if _dingtalk_token_cache["token"] and now < _dingtalk_token_cache["expires_at"]:
+        return _dingtalk_token_cache["token"]
+
+    client_id = os.getenv("DINGTALK_CLIENT_ID", "")
+    client_secret = os.getenv("DINGTALK_CLIENT_SECRET", "")
+
+    if not client_id or not client_secret:
+        print("[钉钉API] 未配置 CLIENT_ID / CLIENT_SECRET，无法获取 token")
+        return ""
+
+    import requests as _requests
+
+    try:
+        resp = _requests.post(
+            "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+            json={"appKey": client_id, "appSecret": client_secret},
+            timeout=10,
+        )
+        data = resp.json()
+        token = data.get("accessToken", "")
+        expires_in = data.get("expireIn", 7200)  # 默认 2 小时
+        _dingtalk_token_cache["token"] = token
+        _dingtalk_token_cache["expires_at"] = now + expires_in - 300  # 提前 5 分钟刷新
+        print(f"[钉钉API] 获取 access_token 成功，有效期 {expires_in}s")
+        return token
+    except Exception as e:
+        print(f"[钉钉API] 获取 access_token 失败：{e}")
+        return ""
+
+
+def _send_dingtalk_direct_message(user_id: str, title: str, text: str) -> bool:
+    """
+    通过钉钉 Open API 给指定用户发送一条 Markdown 私聊消息。
+
+    参数：
+        user_id  : 工程师的钉钉 UserId
+        title    : 消息标题
+        text     : 消息正文（Markdown 格式）
+
+    返回：成功返回 True，失败返回 False
+    """
+    if not user_id:
+        print("[钉钉私聊] user_id 为空，跳过")
+        return False
+
+    token = _get_dingtalk_access_token()
+    if not token:
+        print("[钉钉私聊] 无法获取 access_token，跳过")
+        return False
+
+    client_id = os.getenv("DINGTALK_CLIENT_ID", "")
+
+    import requests as _requests
+
+    payload = {
+        "robotCode": client_id,
+        "userIds": [user_id],
+        "msgKey": "sampleMarkdown",
+        "msgParam": json.dumps({"title": title, "text": text}, ensure_ascii=False),
+    }
+
+    try:
+        resp = _requests.post(
+            "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend",
+            headers={
+                "x-acs-dingtalk-access-token": token,
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=10,
+        )
+        result = resp.json()
+        # 成功的响应通常包含 processQueryKey
+        if "processQueryKey" in result or resp.status_code == 200:
+            print(f"[钉钉私聊] ✅ 已向 {user_id} 发送私聊提醒")
+            return True
+        else:
+            print(f"[钉钉私聊] 发送失败：{result}")
+            return False
+    except Exception as e:
+        print(f"[钉钉私聊] 请求异常：{e}")
+        return False
+
+
+# ==================== 通知函数 ====================
+
+
 def _notify_engineer(engineer_name: str, task: Task):
     """
-    发送通知：优先钉钉，其次企业微信。
+    发送通知：群内 @ 提及 + 钉钉私聊提醒。
+
+    1. 群内 @：通过 Webhook 发送群消息，同时 @ 对应工程师
+    2. 私聊提醒：通过钉钉 Open API 给工程师发送单聊消息
     """
+    # ---- 查找工程师信息 ----
+    engineers = load_engineers()
+    engineer_info = None
+    for e in engineers:
+        if e.get("name") == engineer_name:
+            engineer_info = e
+            break
+
+    mobile = engineer_info.get("mobile", "") if engineer_info else ""
+    dingtalk_user_id = (
+        engineer_info.get("dingtalk_user_id", "") if engineer_info else ""
+    )
+
     dingtalk_url = os.getenv("DINGTALK_WEBHOOK", "")
     wechat_url = os.getenv("WECHAT_WEBHOOK", "")
 
     import requests
 
-    # --- 钉钉消息 ---
+    # ========== 1. 群内消息（支持 @ 提及）==========
     if dingtalk_url:
-        dingtalk_payload = {
-            "msgtype": "markdown",
-            "markdown": {
-                "title": "🚨 新任务分配",
-                "text": f"""## 🚨 新运维任务分配
-> 负责人：**{engineer_name}**
+        # 拼接 Markdown 正文，若已知手机号则用 @ 格式
+        at_line = f"\n> @{mobile}" if mobile else ""
+        markdown_text = f"""## 🚨 新运维任务分配
+> 负责人：**{engineer_name}**{at_line}
 > 任务：{task.title}
 > 提交人：{task.submitted_by}
 
@@ -301,16 +416,65 @@ def _notify_engineer(engineer_name: str, task: Task):
 {task.description}
 
 ---
-[查看详情](http://your-ticket-system)""",
+[查看详情](http://your-ticket-system)"""
+
+        dingtalk_payload = {
+            "msgtype": "markdown",
+            "markdown": {
+                "title": "🚨 新任务分配",
+                "text": markdown_text,
+            },
+            "at": {
+                "atMobiles": [mobile] if mobile else [],
+                "isAtAll": False,
             },
         }
-        try:
-            requests.post(dingtalk_url, json=dingtalk_payload, timeout=5)
-        except Exception as e:
-            print(f"[钉钉通知] 发送失败：{e}")
 
-    # --- 企业微信消息（兼容）---
-    elif wechat_url:
+        try:
+            resp = requests.post(dingtalk_url, json=dingtalk_payload, timeout=5)
+            if resp.status_code == 200:
+                print(f"[钉钉群通知] ✅ 已在群里 @{engineer_name}({mobile})")
+            else:
+                print(f"[钉钉群通知] 发送失败：{resp.text}")
+        except Exception as e:
+            print(f"[钉钉群通知] 发送异常：{e}")
+
+    # ========== 2. 私聊提醒（钉钉 Open API）==========
+    if dingtalk_user_id:
+        dm_title = "🔧 运维任务分配提醒"
+        dm_text = f"""## 🔧 新任务已分配给你
+
+> 任务：**{task.title}**
+> 提交人：{task.submitted_by}
+
+**详细描述：**
+{task.description}
+
+---
+请尽快处理，如有疑问请联系提交人。"""
+        _send_dingtalk_direct_message(dingtalk_user_id, dm_title, dm_text)
+    elif mobile:
+        # 如果没有钉钉 UserId但有手机号，尝试用手机号作为 userId
+        print(f"[钉钉私聊] 未配置 dingtalk_user_id，尝试用手机号 {mobile} 发送")
+        dm_title = "🔧 运维任务分配提醒"
+        dm_text = f"""## 🔧 新任务已分配给你
+
+> 任务：**{task.title}**
+> 提交人：{task.submitted_by}
+
+**详细描述：**
+{task.description}
+
+---
+请尽快处理。"""
+        _send_dingtalk_direct_message(mobile, dm_title, dm_text)
+    else:
+        print(
+            f"[钉钉私聊] {engineer_name} 未配置 mobile/dingtalk_user_id，跳过私聊提醒"
+        )
+
+    # ========== 3. 企业微信兜底 ==========
+    if not dingtalk_url and wechat_url:
         wechat_payload = {
             "msgtype": "markdown",
             "markdown": {
@@ -327,8 +491,10 @@ def _notify_engineer(engineer_name: str, task: Task):
         except Exception as e:
             print(f"[企微通知] 发送失败：{e}")
 
-    else:
-        print(f"[通知] 未配置 Webhook，跳过。应通知 {engineer_name} 处理：{task.title}")
+    if not dingtalk_url and not wechat_url:
+        print(
+            f"[通知] 未配置任何 Webhook，跳过。应通知 {engineer_name} 处理：{task.title}"
+        )
 
 
 # ==================== 组装工作流 ====================

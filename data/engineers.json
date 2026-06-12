@@ -10,24 +10,32 @@
       "基础网络问题",
       "AD域"
     ],
+    "mobile": "13800000001",
+    "dingtalk_user_id": "user001",
     "current_load": 0,
     "available": true
   },
   {
     "name": "网络",
     "skills": ["网络", "VPN", "防火墙", "路由器"],
+    "mobile": "13800000002",
+    "dingtalk_user_id": "user002",
     "current_load": 0,
     "available": true
   },
   {
     "name": "王五",
     "skills": ["数据库", "Linux服务器", "安全"],
+    "mobile": "13800000003",
+    "dingtalk_user_id": "user003",
     "current_load": 0,
     "available": true
   },
   {
     "name": "赵六",
     "skills": ["erp系统", "plm系统", "服务器"],
+    "mobile": "13800000004",
+    "dingtalk_user_id": "user004",
     "current_load": 0,
     "available": true
   }
