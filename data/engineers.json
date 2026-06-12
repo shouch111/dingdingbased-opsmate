@@ -1,0 +1,34 @@
+[
+  {
+    "name": "桌面ITshouch",
+    "skills": [
+      "打印机",
+      "电脑硬件",
+      "Windows系统",
+      "linux系统",
+      "阿里邮箱",
+      "基础网络问题",
+      "AD域"
+    ],
+    "current_load": 0,
+    "available": true
+  },
+  {
+    "name": "网络",
+    "skills": ["网络", "VPN", "防火墙", "路由器"],
+    "current_load": 0,
+    "available": true
+  },
+  {
+    "name": "王五",
+    "skills": ["数据库", "Linux服务器", "安全"],
+    "current_load": 0,
+    "available": true
+  },
+  {
+    "name": "赵六",
+    "skills": ["erp系统", "plm系统", "服务器"],
+    "current_load": 0,
+    "available": true
+  }
+]
