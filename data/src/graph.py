@@ -380,10 +380,10 @@ def _send_dingtalk_direct_message(user_id: str, title: str, text: str) -> bool:
 
 def _notify_engineer(engineer_name: str, task: Task):
     """
-    发送通知：群内 @ 提及 + 钉钉私聊提醒。
+    发送通知：IT 群简报 + 工程师私聊完整工单。
 
-    1. 群内 @：通过 Webhook 发送群消息，同时 @ 对应工程师
-    2. 私聊提醒：通过钉钉 Open API 给工程师发送单聊消息
+    1. IT 群简报：通过 Webhook 发送摘要消息，@ 对应工程师，让团队知道谁在负责
+    2. 私聊完整工单：通过钉钉 Open API 给工程师发送完整的任务详情（仅本人可见）
     """
     # ---- 查找工程师信息 ----
     engineers = load_engineers()
@@ -403,25 +403,27 @@ def _notify_engineer(engineer_name: str, task: Task):
 
     import requests
 
-    # ========== 1. 群内消息（支持 @ 提及）==========
+    # ========== 1. IT 群简报（@ 提及对应工程师）==========
     if dingtalk_url:
-        # 拼接 Markdown 正文，若已知手机号则用 @ 格式
+        # 截取描述前 100 字作为简报摘要
+        brief_desc = task.description[:100].replace("\n", " ")
+        if len(task.description) > 100:
+            brief_desc += "…"
         at_line = f"\n> @{mobile}" if mobile else ""
-        markdown_text = f"""## 🚨 新运维任务分配
+        markdown_text = f"""## 🚨 新运维任务
 > 负责人：**{engineer_name}**{at_line}
 > 任务：{task.title}
 > 提交人：{task.submitted_by}
 
-**详细描述：**
-{task.description}
+**摘要：**{brief_desc}
 
 ---
-[查看详情](http://your-ticket-system)"""
+📋 完整工单已私发 {engineer_name}"""
 
         dingtalk_payload = {
             "msgtype": "markdown",
             "markdown": {
-                "title": "🚨 新任务分配",
+                "title": "🚨 新运维任务",
                 "text": markdown_text,
             },
             "at": {
@@ -433,40 +435,44 @@ def _notify_engineer(engineer_name: str, task: Task):
         try:
             resp = requests.post(dingtalk_url, json=dingtalk_payload, timeout=5)
             if resp.status_code == 200:
-                print(f"[钉钉群通知] ✅ 已在群里 @{engineer_name}({mobile})")
+                print(f"[钉钉群通知] ✅ 已在群里 @{engineer_name}({mobile})，发送简报")
             else:
                 print(f"[钉钉群通知] 发送失败：{resp.text}")
         except Exception as e:
             print(f"[钉钉群通知] 发送异常：{e}")
 
-    # ========== 2. 私聊提醒（钉钉 Open API）==========
+    # ========== 2. 私聊完整工单（钉钉 Open API）==========
     if dingtalk_user_id:
-        dm_title = "🔧 运维任务分配提醒"
+        dm_title = f"🔧 新任务「{task.title}」"
         dm_text = f"""## 🔧 新任务已分配给你
 
 > 任务：**{task.title}**
 > 提交人：{task.submitted_by}
+> 负责人：**{engineer_name}**
 
-**详细描述：**
+**完整描述：**
 {task.description}
 
 ---
-请尽快处理，如有疑问请联系提交人。"""
+请尽快处理，如有疑问请联系提交人「{task.submitted_by}」。
+（此消息仅你可见）"""
         _send_dingtalk_direct_message(dingtalk_user_id, dm_title, dm_text)
     elif mobile:
         # 如果没有钉钉 UserId但有手机号，尝试用手机号作为 userId
         print(f"[钉钉私聊] 未配置 dingtalk_user_id，尝试用手机号 {mobile} 发送")
-        dm_title = "🔧 运维任务分配提醒"
+        dm_title = f"🔧 新任务「{task.title}」"
         dm_text = f"""## 🔧 新任务已分配给你
 
 > 任务：**{task.title}**
 > 提交人：{task.submitted_by}
+> 负责人：**{engineer_name}**
 
-**详细描述：**
+**完整描述：**
 {task.description}
 
 ---
-请尽快处理。"""
+请尽快处理。
+（此消息仅你可见）"""
         _send_dingtalk_direct_message(mobile, dm_title, dm_text)
     else:
         print(
