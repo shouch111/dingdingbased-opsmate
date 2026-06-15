@@ -3,7 +3,9 @@
 通过 WebSocket 长连接接收钉钉推送，无需公网 URL。
 """
 
+import json
 import os
+from pathlib import Path
 
 from dingtalk_stream import (
     AckMessage,
@@ -18,6 +20,41 @@ load_dotenv()
 
 CLIENT_ID = os.getenv("DINGTALK_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("DINGTALK_CLIENT_SECRET", "")
+ENGINEERS_PATH = Path(__file__).parent.parent / "engineers.json"
+
+
+def _auto_fill_engineer_id(sender_nick: str, sender_id: str):
+    """
+    自动回填工程师的钉钉 UserID。
+    如果发送者昵称匹配 engineers.json 中某位工程师，
+    且该工程师的 dingtalk_user_id 为空，则自动填入。
+    """
+    if not sender_id or not sender_nick:
+        return
+
+    if not ENGINEERS_PATH.exists():
+        return
+
+    try:
+        with open(ENGINEERS_PATH, "r", encoding="utf-8") as f:
+            engineers = json.load(f)
+    except Exception:
+        return
+
+    updated = False
+    for e in engineers:
+        if e.get("name") == sender_nick and not e.get("dingtalk_user_id"):
+            e["dingtalk_user_id"] = sender_id
+            updated = True
+            print(f"[钉钉] 🔗 自动绑定：{sender_nick} → dingtalk_user_id={sender_id}")
+
+    if updated:
+        try:
+            with open(ENGINEERS_PATH, "w", encoding="utf-8") as f:
+                json.dump(engineers, f, ensure_ascii=False, indent=2)
+            print(f"[钉钉] ✅ 已保存 engineers.json")
+        except Exception as ex:
+            print(f"[钉钉] ❌ 保存 engineers.json 失败：{ex}")
 
 
 class OpsAgentChatbot(AsyncChatbotHandler):
@@ -44,6 +81,15 @@ class OpsAgentChatbot(AsyncChatbotHandler):
         sender_nick = incoming_message.sender_nick or "用户"
         conversation_type = incoming_message.conversation_type
         print(f"[钉钉 DEBUG] process 被调用！发送者: {sender_nick}, 会话类型: {conversation_type}")
+
+        # 自动回填工程师的钉钉 UserID（仅在首次匹配时写入）
+        sender_id = getattr(incoming_message, "sender_id", "")
+        sender_staff_id = getattr(incoming_message, "sender_staff_id", "")
+        print(f"[钉钉] 🆔 sender_id={sender_id}, sender_staff_id={sender_staff_id}")
+        # 私聊 API 需要 staff_id，优先用它；若无则回退到 sender_id
+        bind_id = sender_staff_id or sender_id
+        _auto_fill_engineer_id(sender_nick, bind_id)
+
 
         # 2. 提取文本
         text_list = incoming_message.get_text_list()

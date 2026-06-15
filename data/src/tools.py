@@ -291,6 +291,8 @@ def load_engineers() -> list[dict]:
     """从 data/engineers.json 加载工程师列表。"""
     file_path = DATA_DIR / "engineers.json"
     print(f"[tools] 正在加载工程师名单：{file_path}")
+    # print(f"[tools] DATA_DIR = {DATA_DIR}")
+    # print(f"[tools] 文件存在: {file_path.exists()}, 大小: {file_path.stat().st_size if file_path.exists() else 'N/A'} bytes")
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             engineers = json.load(f)

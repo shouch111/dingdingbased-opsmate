@@ -10,6 +10,7 @@
 |------|-----------|
 | 用户提交「打印机连不上」 | → 自动分类为「简单」→ 查知识库 → 自动回复解决步骤 |
 | 用户提交「数据库主库崩溃」 | → 自动分类为「困难」→ 匹配最合适的工程师 → 发送通知 |
+| 用户在钉钉给机器人发「hello」 | → 闲聊过滤 → 自动识别为「简单」→ 友好回复 |
 
 ### 核心技术栈
 
@@ -79,7 +80,8 @@ D:\运维任务分配agent\
         ├── models.py         ← 数据结构定义（Pydantic）
         ├── tools.py          ← 工具函数（知识库、工程师加载）
         ├── graph.py          ← LangGraph 工作流（核心调度）
-        └── main.py           ← FastAPI 入口
+        ├── dingtalk_stream.py← 钉钉 Stream 单聊机器人 + ID 自动绑定
+        └── main.py           ← FastAPI 入口 + 钉钉 Stream 启动
 ```
 
 ---
@@ -92,7 +94,9 @@ D:\运维任务分配agent\
 |------|------|---------|
 | `Difficulty` | 任务难度枚举 | `EASY` / `HARD` |
 | `Task` | 一个运维任务 | `title`, `description`, `submitted_by`, `difficulty` |
-| `Engineer` | 一个 IT 工程师 | `name`, `skills`（技能标签列表）, `current_load`, `available` |
+| `Engineer` | 一个 IT 工程师 | `name`, `skills`, `mobile`, `dingtalk_user_id`, `current_load`, `available` |
+
+> 🆕 `dingtalk_user_id` 可留空，工程师首次发消息后自动回填。
 | `AgentState` | 工作流内部状态 | `task`, `difficulty`, `knowledge_context`, `final_response`, `assigned_engineer` |
 
 **设计要点：** `Engineer.skills` 是匹配算法的核心依据——用技能标签做交集计算。`AgentState` 在工作流节点间传递，每个节点修改其中一部分字段。
@@ -166,6 +170,8 @@ classify_node → [条件判断] → retrieve_node → answer_node
 | `model` | LLM 模型名 | `deepseek-chat` |
 | `base_url` | LLM API 地址 | `https://api.deepseek.com` |
 | `WECHAT_WEBHOOK` | 企业微信机器人 Webhook（可选） | `https://qyapi.weixin.qq.com/...` |
+| `DINGTALK_CLIENT_ID` | 钉钉应用 AppKey（Stream 模式必填） | `dingkc...` |
+| `DINGTALK_CLIENT_SECRET` | 钉钉应用 AppSecret（Stream 模式必填） | `abc123...` |
 
 > **注意：** `model` 和 `base_url` 不带默认值，必须在 `.env` 里配置。
 
@@ -176,12 +182,16 @@ classify_node → [条件判断] → retrieve_node → answer_node
   {
     "name": "张三",
     "skills": ["打印机", "电脑硬件", "Windows系统"],
+    "mobile": "13800000001",
+    "dingtalk_user_id": "",
     "current_load": 2,
     "available": true
   },
   {
     "name": "李四",
     "skills": ["网络", "VPN", "防火墙", "路由器"],
+    "mobile": "13800000002",
+    "dingtalk_user_id": "",
     "current_load": 1,
     "available": true
   }
@@ -189,6 +199,8 @@ classify_node → [条件判断] → retrieve_node → answer_node
 ```
 
 **匹配逻辑：** LLM 会分析任务描述，从技能列表中选出最匹配的工程师。匹配时也会考虑 `current_load`（负载均衡）。
+
+> 🆕 `dingtalk_user_id` 用于钉钉私聊通知，工程师首次给机器人发消息后自动回填，无需手动填写。
 
 ### 5.3 知识库文档
 
@@ -305,7 +317,7 @@ assign_node → LLM 分析需要 "数据库" 技能
 
 | 扩展 | 怎么做 | 难度 |
 |------|--------|------|
-| 接入企业微信/钉钉机器人 | 在后台配置机器人 Webhook，回调地址填 `http://你的IP:8000/task` | ⭐ |
+| 接入钉钉机器人 | ✅ 已完成：支持 Stream 模式单聊 + 群通知 + 私聊通知 | ⭐ |
 | 接入真实工单系统（Jira/禅道） | 在 `assign_node` 里加 HTTP 请求创建工单 | ⭐⭐ |
 | 增加对话式交互 | 在 LangGraph 里加一个「追问细节」节点 | ⭐⭐⭐ |
 | 增加知识库文档 | 往 `knowledge/` 目录添加新的 `.md` 文件即可，重启自动生效 | ⭐ |
@@ -325,6 +337,8 @@ assign_node → LLM 分析需要 "数据库" 技能
 | 知识库检索不到内容 | 文档未向量化 | 删除 `data/chroma_db/` 目录后重启，触发重新构建 |
 | 企业微信通知发不出去 | Webhook 未配置或 URL 错误 | 检查 `WECHAT_WEBHOOK` 环境变量 |
 | ChromaDB 构建失败 | Embedding API 不可用 | 检查 `model` 和 `base_url` 配置，尝试换 embedding 模型 |
+| 修改 engineers.json 不生效 | `__pycache__` 缓存或文件未保存 | 确认已保存，删除 `__pycache__` 后重启 |
+| 钉钉私聊发不出去 | `dingtalk_user_id` 不正确 | 清空 dingtalk_user_id，让工程师重新发消息自动绑定 |
 
 ---
 
@@ -342,4 +356,4 @@ assign_node → LLM 分析需要 "数据库" 技能
 
 > 📅 创建日期：2025-01
 > 👤 适用对象：IT 运维团队，1-2 人维护
-> 🎯 当前状态：MVP 可运行，待对接实际通讯工具
+> 🎯 当前状态：已对接钉钉 Stream 模式，支持单聊自动回复 + 工程师私聊通知

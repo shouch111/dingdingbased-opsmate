@@ -2,7 +2,7 @@
 
 一个基于 **LangGraph + FastAPI + ChromaDB** 的智能运维任务分配 Agent。
 
-> **核心能力：** 初级桌面问题自动回答，困难任务自动匹配合适的 IT 工程师并发送通知。
+> **核心能力：** 钉钉 Stream 单聊接入，简单问题自动回答，困难任务自动匹配工程师并私聊通知。
 
 ---
 
@@ -61,7 +61,8 @@ ops-agent/
         ├── models.py         ← 数据结构定义
         ├── tools.py          ← 工具函数（知识库检索、工程师加载）
         ├── graph.py          ← LangGraph 工作流（核心调度）
-        └── main.py           ← FastAPI 入口
+        ├── dingtalk_stream.py← 钉钉 Stream 单聊机器人
+        └── main.py           ← FastAPI 入口 + 钉钉启动
 ```
 
 ---
@@ -104,6 +105,10 @@ WECHAT_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
 
 # 钉钉通知（可选）
 DINGTALK_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=xxx
+
+# 钉钉 Stream 模式（必配，用于接收单聊消息和自动回复）
+DINGTALK_CLIENT_ID=你的AppKey
+DINGTALK_CLIENT_SECRET=你的AppSecret
 ```
 
 > **支持的 LLM 厂商：** DeepSeek / OpenAI / 通义千问 / 任何兼容 OpenAI API 格式的服务。
@@ -132,17 +137,23 @@ DINGTALK_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=xxx
   {
     "name": "张三",
     "skills": ["打印机", "电脑硬件", "Windows系统"],
+    "mobile": "13800000001",
+    "dingtalk_user_id": "",
     "current_load": 2,
     "available": true
   },
   {
     "name": "李四",
     "skills": ["网络", "VPN", "防火墙"],
+    "mobile": "13800000002",
+    "dingtalk_user_id": "",
     "current_load": 1,
     "available": true
   }
 ]
 ```
+
+> 💡 `dingtalk_user_id` 可以留空，工程师首次给机器人发消息后会自动回填。
 
 ### 6. 启动
 
@@ -169,6 +180,24 @@ curl -X POST http://localhost:8000/task \
   -H "Content-Type: application/json" \
   -d '{"title":"数据库宕机","description":"MySQL主库崩溃","submitted_by":"运维"}'
 ```
+
+---
+
+## 钉钉单聊机器人
+
+项目已内置钉钉 Stream 模式支持，启动后自动连接钉钉 WebSocket 长连接。
+
+### 接入步骤
+
+1. 在 [钉钉开放平台](https://open.dingtalk.com) 创建企业应用，获取 AppKey 和 AppSecret
+2. 在 `.env` 中填入 `DINGTALK_CLIENT_ID` 和 `DINGTALK_CLIENT_SECRET`
+3. 在 `engineers.json` 中预填工程师信息（姓名、技能、手机），`dingtalk_user_id` 留空
+4. 启动服务 → 让每位工程师给机器人发一条消息 → UserID 自动回填
+
+### 工程师 ID 自动绑定
+
+工程师首次给机器人发消息时，系统会自动将钉钉 UserID 写入 `engineers.json`，
+后续困难任务即可通过钉钉私聊通知对应工程师。
 
 ---
 
@@ -209,27 +238,10 @@ curl -X POST http://localhost:8000/task \
 
 ## 扩展指南
 
-### 对接钉钉机器人
+### 对接钉钉群通知
 
-1. 在钉钉群 → 群设置 → 智能群助手 → 添加机器人 → 自定义
-2. 复制 Webhook 地址，填入 `.env` 的 `DINGTALK_WEBHOOK`
-3. 修改 `graph.py` 的 `_notify_engineer` 函数，加入钉钉消息格式：
-
-```python
-# 钉钉消息格式
-dingtalk_payload = {
-    "msgtype": "markdown",
-    "markdown": {
-        "title": "新任务分配",
-        "text": f"""## 🚨 新任务分配
-> 负责人：{engineer_name}
-> 任务：{task.title}
-
-**详细描述：**
-{task.description}"""
-    }
-}
-```
+已内置群 Webhook 通知支持。在 `.env` 中配置 `DINGTALK_WEBHOOK` 后，
+困难任务会自动在群里发送简报并 @ 对应工程师。
 
 ### 对接企业微信
 
@@ -255,7 +267,7 @@ dingtalk_payload = {
 
 如果你想用 AI 编程工具（Cursor / Windsurf / Copilot）继续开发，把这些上下文告诉 AI：
 
-> 这是一个基于 LangGraph 的运维任务分配 Agent。工作流：classify_node 分类难度 → easy 走 retrieve_node + answer_node 自动回复，hard 走 assign_node 匹配工程师发通知。知识库用 ChromaDB + HuggingFace 本地 embedding，LLM 用 OpenAI 兼容 API。入口是 main.py 的 FastAPI。
+> 这是一个基于 LangGraph 的运维任务分配 Agent。接入钉钉 Stream 模式（dingtalk_stream.py），通过 WebSocket 接收单聊消息。工作流：classify_node 分类难度（含闲聊过滤）→ easy 走 retrieve_node + answer_node 自动回复，hard 走 assign_node 匹配工程师并私聊通知。工程师首次发消息自动回填 dingtalk_user_id。知识库用 ChromaDB + HuggingFace 本地 embedding，LLM 用 OpenAI 兼容 API。入口是 main.py 的 FastAPI + 钉钉 Stream。
 
 把 `README.md` 和 `运维Agent框架文档.md` 一起作为 AI 的上下文引用，AI 就能准确理解项目。
 
@@ -271,6 +283,8 @@ dingtalk_payload = {
 | 知识库检索不到 | 向量库未重建 | 删 `chroma_db/` 后重启 |
 | LLM 返回 404 | base_url 配错 | 检查 `.env` 的 `base_url` 是否为 LLM API 地址 |
 | 通知发不出去 | Webhook 未配 | 检查 `.env` 的 `WECHAT_WEBHOOK` / `DINGTALK_WEBHOOK` |
+| 钉钉私聊通知发不出 | dingtalk_user_id 不正确 | 让工程师给机器人发消息，自动绑定正确的 Staff ID |
+| 修改 engineers.json 不生效 | 文件未保存或 pycache 缓存 | 确认文件已 Ctrl+S 保存，删除 `__pycache__` 后重启 |
 
 ---
 
