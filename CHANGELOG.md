@@ -1,5 +1,42 @@
 # 更新日志
 
+## [v0.3.0] - 2025 第一阶段
+
+### 🆕 新增 — 任务持久化
+- 引入 MySQL + SQLAlchemy ORM，任务/工程师/反馈数据持久化
+- 新增 `database.py`（ORM 模型 + 连接管理 + 自动建库建表）
+- 新增 `db_manager.py`（全部 CRUD 操作封装）
+- 任务状态机：auto_answered / assigned / resolved
+- `current_load` 改为动态查询，不再手动维护
+- `main.py` 启动时自动建库建表 + engineers.json 数据迁移
+- 新增 `/tasks`、`/engineers` API 接口
+
+### 🆕 新增 — 反馈闭环
+- 新增 `feedback.py`：反馈识别 + 路由 + 处理逻辑
+- 钉钉消息先判断反馈（关键词匹配），再走新任务流程
+- 用户反馈"未解决"：auto_answered 升级分配工程师，assigned 重新催办
+- 用户反馈"已解决"：标记 resolved 关闭任务
+- 工程师回复"已解决"：标记 resolved + 私聊通知提交人
+- 方案 A：按钉钉 ID 追踪用户最近一条 active 任务
+
+### 🆕 新增 — 负载均衡
+- 混合策略：LLM 筛技能（返回候选人列表）+ 算法做负载均衡
+- 优先分配无任务工程师，同负载随机选择
+- 全部不在岗时仍从匹配人选最低负载（方案 B）
+- `assign_engineer()` 独立函数，供 assign_node 和反馈升级复用
+
+### 🔧 优化
+- `tools.py`：load_engineers 改为查 DB，JSON 降级兜底
+- `dingtalk_stream.py`：_auto_fill_engineer_id 改为写 DB
+- `graph.py`：answer/assign 节点末尾存库，回答附任务编号
+- `models.py`：AgentState 新增 submitter_id、task_no 字段
+- ORM 模型使用 SQLAlchemy 2.0 Mapped 风格
+
+### 📦 依赖
+- 新增 sqlalchemy>=2.0.0、pymysql>=1.1.0、cryptography>=42.0.0
+
+---
+
 ## [v0.2.0] - 2026-06-15
 
 ### 🆕 新增

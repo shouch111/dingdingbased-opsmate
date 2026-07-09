@@ -31,7 +31,7 @@ open_code_go_api = os.getenv("open_code_go_api")
 
 # -------------------- 知识库相关（支持热更新） --------------------
 
-_SYNC_COOLDOWN = 5.0       # 同步冷却时间（秒）
+_SYNC_COOLDOWN = 5.0  # 同步冷却时间（秒）
 _last_sync_time = 0.0
 
 
@@ -173,7 +173,9 @@ def _full_rebuild(knowledge_dir: Path, vs_path: Path):
         file_index[rel_path] = _get_file_hash(md_file)
     _save_file_index(vs_path / "file_index.json", file_index)
 
-    print(f"[tools] 全量重建完成，共索引 {len(file_index)} 个文件、{len(all_ids)} 个 chunk")
+    print(
+        f"[tools] 全量重建完成，共索引 {len(file_index)} 个文件、{len(all_ids)} 个 chunk"
+    )
     return vs
 
 
@@ -192,7 +194,12 @@ def sync_knowledge(force: bool = False):
     knowledge_dir = DATA_DIR / "knowledge"
     index_path = vs_path / "file_index.json"
 
-    if force or not vs_path.exists() or not any(vs_path.iterdir()) or not index_path.exists():
+    if (
+        force
+        or not vs_path.exists()
+        or not any(vs_path.iterdir())
+        or not index_path.exists()
+    ):
         return _full_rebuild(knowledge_dir, vs_path)
 
     vs = _get_or_create_vectorstore()
@@ -212,10 +219,7 @@ def sync_knowledge(force: bool = False):
 
     added = new_set - old_set
     deleted = old_set - new_set
-    modified = {
-        f for f in new_set & old_set
-        if current_index[f] != old_index[f]
-    }
+    modified = {f for f in new_set & old_set if current_index[f] != old_index[f]}
 
     if not added and not deleted and not modified:
         return vs
@@ -238,7 +242,9 @@ def sync_knowledge(force: bool = False):
     _save_file_index(index_path, current_index)
 
     total = len(added) + len(deleted) + len(modified)
-    print(f"[tools] 增量同步完成：+{len(added)}/-{len(deleted)}/~{len(modified)}（共 {total} 个文件变更）")
+    print(
+        f"[tools] 增量同步完成：+{len(added)}/-{len(deleted)}/~{len(modified)}（共 {total} 个文件变更）"
+    )
     return vs
 
 
@@ -288,24 +294,50 @@ def retrieve_knowledge(query: str, top_k: int = 3) -> str:
 
 
 def load_engineers() -> list[dict]:
-    """从 data/engineers.json 加载工程师列表。"""
+    """
+    加载工程师列表（从数据库）。
+    保留原接口签名，上层代码（graph.py）无需改动。
+    若 DB 未就绪则降级读 engineers.json。
+    """
+    try:
+        from . import db_manager
+
+        engineers = db_manager.load_engineers_from_db()
+        if engineers:
+            # 动态填充 current_load
+            for e in engineers:
+                e["current_load"] = db_manager.count_active_tasks(e["name"])
+            print(
+                f"[tools] 从 DB 加载 {len(engineers)} 位工程师："
+                f"{[e.get('name', '?') for e in engineers]}"
+            )
+            return engineers
+        # DB 为空，降级读 JSON
+        print("[tools] DB 工程师表为空，尝试读取 engineers.json")
+    except Exception as e:
+        print(f"[tools] ⚠️ DB 加载失败，降级读 engineers.json：{e}")
+
+    return _load_engineers_from_json()
+
+
+def _load_engineers_from_json() -> list[dict]:
+    """降级方案：从 engineers.json 加载（DB 不可用时使用）"""
     file_path = DATA_DIR / "engineers.json"
-    print(f"[tools] 正在加载工程师名单：{file_path}")
-    # print(f"[tools] DATA_DIR = {DATA_DIR}")
-    # print(f"[tools] 文件存在: {file_path.exists()}, 大小: {file_path.stat().st_size if file_path.exists() else 'N/A'} bytes")
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             engineers = json.load(f)
-        print(
-            f"[tools] 成功加载 {len(engineers)} 位工程师："
-            f"{[e.get('name', '?') for e in engineers]}"
-        )
+        print(f"[tools] 从 JSON 加载 {len(engineers)} 位工程师")
         return engineers
-    except FileNotFoundError:
-        print(f"[tools] ❌ 找不到工程师名单文件：{file_path}")
-        print(f"[tools]    DATA_DIR = {DATA_DIR}")
-        print(f"[tools]    当前工作目录 = {os.getcwd()}")
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"[tools] ❌ engineers.json 也不可用：{e}")
         return []
-    except json.JSONDecodeError as e:
-        print(f"[tools] ❌ 工程师名单 JSON 格式错误：{e}")
-        return []
+
+
+def count_active_tasks(engineer_name: str) -> int:
+    """动态计算工程师当前活跃任务数（current_load）"""
+    try:
+        from . import db_manager
+
+        return db_manager.count_active_tasks(engineer_name)
+    except Exception:
+        return 0

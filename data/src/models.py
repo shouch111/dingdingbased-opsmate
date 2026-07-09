@@ -33,3 +33,5 @@ class AgentState(BaseModel):
     knowledge_context: str = ""
     final_response: str = ""
     assigned_engineer: str = ""
+    submitter_id: str = ""  # 提交人钉钉 ID（反馈追踪用）
+    task_no: str = ""  # 任务编号（存库后回填）
