@@ -91,11 +91,11 @@ async def handle_message(req: MessageRequest):
     """
     ★ 统一消息入口 -- 所有消息源（钉钉/API/Web）统一走此接口。
 
-    流程：预处理（脱敏+意图+复杂度）-> AI 处理（模型路由+工具）-> 后处理（入库+记忆）
+    混合架构：预处理 -> 路由分流（确定性/简单/Agent）-> 后处理
     """
-    from .ai_agent import ai_process
     from .postprocess import postprocess
     from .preprocess import preprocess
+    from .router import route
 
     print(f"\n{'=' * 60}")
     print(f"[message] 来源={req.source} 发送者={req.sender_name}")
@@ -109,50 +109,51 @@ async def handle_message(req: MessageRequest):
         print(f"[message] 预处理失败：{e}")
         return MessageResponse(response="处理出错，请重试。")
 
-    intent = pre["intent"]
-    complexity = pre["complexity"]
-    desensitized = pre["desensitized"]
-
-    # ② AI 处理：模型路由 + 意图注入 + 工具调用
+    # ② 混合路由：按意图/复杂度分流处理
     try:
-        ai_result = ai_process(
-            desensitized_content=desensitized,
-            intent=intent,
-            complexity=complexity,
-            sender_id=req.sender_id,
-        )
-        ai_response = ai_result["response"]
-        model_used = ai_result["model_used"]
+        result = route(pre, req.sender_name, req.sender_id)
     except Exception as e:
-        print(f"[message] AI 处理失败：{e}")
+        print(f"[message] 路由处理失败：{e}")
         return MessageResponse(
-            intent=intent,
-            complexity=complexity,
+            intent=pre["intent"],
+            complexity=pre["complexity"],
             response="处理出错，请联系 IT 工程师。",
         )
 
-    # ③ 后处理：脱敏入库 + 总结 + 向量化记忆
-    try:
-        post = postprocess(
-            raw_query=req.content,
-            ai_response=ai_response,
-            intent=intent,
-            complexity=complexity,
-            model_used=model_used,
-            sender_name=req.sender_name,
-            sender_id=req.sender_id,
-        )
-    except Exception as e:
-        print(f"[message] 后处理失败：{e}")
-        post = {"task_no": "", "memory_saved": False, "response": ai_response}
+    intent = result.get("intent", pre["intent"])
+    complexity = result.get("complexity", pre["complexity"])
+    model_used = result.get("model_used", "")
+    ai_response = result["response"]
+
+    # ③ 后处理：仅对需要存库的走（简单报障/Agent报障）
+    task_no = ""
+    memory_saved = False
+    response = ai_response
+
+    if result.get("needs_postprocess"):
+        try:
+            post = postprocess(
+                raw_query=req.content,
+                ai_response=ai_response,
+                intent=intent,
+                complexity=complexity,
+                model_used=model_used,
+                sender_name=req.sender_name,
+                sender_id=req.sender_id,
+            )
+            task_no = post["task_no"]
+            memory_saved = post["memory_saved"]
+            response = post["response"]
+        except Exception as e:
+            print(f"[message] 后处理失败：{e}")
 
     return MessageResponse(
         intent=intent,
         complexity=complexity,
         model_used=model_used,
-        response=post["response"],
-        task_no=post["task_no"],
-        memory_saved=post["memory_saved"],
+        response=response,
+        task_no=task_no,
+        memory_saved=memory_saved,
     )
 
 
