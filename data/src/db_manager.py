@@ -410,3 +410,68 @@ def list_feedbacks(task_id: int) -> list[dict]:
         ]
     finally:
         session.close()
+
+
+# ==================== 提醒相关（重新提醒功能） ====================
+
+
+# 系统提醒记录的 feedback_by 前缀，格式：系统提醒|工程师名
+REMINDER_PREFIX = "系统提醒"
+
+
+def _reminder_key(engineer_name: str) -> str:
+    """生成提醒记录的 feedback_by 标识"""
+    return f"{REMINDER_PREFIX}|{engineer_name}"
+
+
+def get_assigned_tasks() -> list[dict]:
+    """查询所有 assigned 状态的任务（供调度器扫描超时）"""
+    session = _get_session()
+    try:
+        tasks = (
+            session.query(Task)
+            .filter(Task.status == "assigned")
+            .order_by(Task.created_at)
+            .all()
+        )
+        return [_task_to_dict(t) for t in tasks]
+    finally:
+        session.close()
+
+
+def count_reminders(task_id: int, engineer_name: str) -> int:
+    """统计某工程师在某任务上已被提醒的次数"""
+    session = _get_session()
+    try:
+        return (
+            session.query(Feedback)
+            .filter(
+                Feedback.task_id == task_id,
+                Feedback.feedback_by == _reminder_key(engineer_name),
+            )
+            .count()
+        )
+    finally:
+        session.close()
+
+
+def get_last_reminder_time(task_id: int, engineer_name: str) -> Optional[datetime]:
+    """获取某工程师在某任务上的最后一次提醒时间，无记录返回 None"""
+    session = _get_session()
+    try:
+        result = (
+            session.query(func.max(Feedback.created_at))
+            .filter(
+                Feedback.task_id == task_id,
+                Feedback.feedback_by == _reminder_key(engineer_name),
+            )
+            .scalar()
+        )
+        return result
+    finally:
+        session.close()
+
+
+def create_reminder(task_id: int, engineer_name: str) -> dict:
+    """记录一次系统提醒（复用 feedbacks 表）"""
+    return create_feedback(task_id, "unresolved", _reminder_key(engineer_name))

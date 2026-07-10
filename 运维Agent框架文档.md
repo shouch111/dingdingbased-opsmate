@@ -120,6 +120,7 @@ D:\运维任务分配agent\
         ├── tools.py          ← 工具函数（知识库、工程师加载）
         ├── graph.py          ← LangGraph 工作流（核心调度 + 负载均衡）
         ├── feedback.py       ← 反馈识别与处理（反馈闭环）
+        ├── scheduler.py       ← 定时提醒调度器（超时提醒/转派）
         ├── dingtalk_stream.py← 钉钉 Stream 单聊机器人 + 消息路由
         └── main.py           ← FastAPI 入口 + 钉钉 Stream + 启动初始化
 ```
@@ -254,6 +255,8 @@ classify_node -> [条件判断] -> retrieve_node -> answer_node（存库 auto_an
 | `MYSQL_USER` | **新增** MySQL 用户名 | `root` |
 | `MYSQL_PASSWORD` | **新增** MySQL 密码 | `你的密码` |
 | `MYSQL_DATABASE` | **新增** MySQL 数据库名 | `ops_agent` |
+| `REMINDER_INTERVAL_MINUTES` | **新增** 提醒间隔（分钟） | `30` |
+| `REMINDER_MAX_COUNT` | **新增** 最大提醒次数 | `3` |
 
 > **注意：** MySQL 数据库和表在首次启动时自动创建，无需手动建库建表。
 
@@ -445,6 +448,36 @@ feedback -> 识别"已解决" -> update_task_status(resolved)
 
 ### 版本历史
 
+#### 🏷️ v1.1.0 -- 定时重新提醒（2026-07-09）
+
+> **改版主题：** 超时未解决任务自动提醒 + 转派，形成完整的 SLA 催办闭环
+
+**新增模块：**
+
+| 模块 | 文件 | 说明 |
+|------|------|------|
+| 定时提醒调度器 | `scheduler.py` | APScheduler 后台扫描，超时提醒/转派/通知 IT 群 |
+
+**核心改动：**
+
+| 改动项 | 说明 |
+|--------|------|
+| 超时提醒 | assigned 后 30 分钟未解决 -> 钉钉私聊提醒（循环） |
+| 自动转派 | 达到 3 次提醒未响应 -> 排除当前工程师重新负载均衡分配 |
+| 无人可转 | 仅一名工程师时继续提醒 + 通知 IT 群人工介入 |
+| 提醒追踪 | 复用 feedbacks 表，feedback_by=系统提醒\|工程师名，不改表结构 |
+| 转派计数重置 | 按工程师名区分，新工程师计数自然为 0 |
+| 配置化 | REMINDER_INTERVAL_MINUTES / REMINDER_MAX_COUNT 放 .env |
+
+**修改文件：**
+- `graph.py`：assign_engineer() 新增 exclude_name 参数（向后兼容）
+- `db_manager.py`：新增 4 个提醒查询函数
+- `main.py`：启动时启动调度器
+
+**新增依赖：** apscheduler>=3.10.0
+
+---
+
 #### 🏷️ v1.0.0 -- 第一次大改版（2026-07-09）
 
 > **改版主题：** 从"通知工具"升级为"工单系统" -- 补齐任务持久化、反馈闭环、负载均衡三大核心能力
@@ -512,6 +545,6 @@ feedback -> 识别"已解决" -> update_task_status(resolved)
 ---
 
 > 📅 创建日期：2025-01
-> 📅 最近大改版：2026-07-09（v1.0.0 第一次大改版）
+> 📅 最近更新：2026-07-09（v1.1.0 定时重新提醒）
 > 👤 适用对象：IT 运维团队，1-2 人维护
-> 🎯 当前状态：任务持久化 + 反馈闭环 + 负载均衡已完成，支持完整工单生命周期
+> 🎯 当前状态：任务持久化 + 反馈闭环 + 负载均衡 + 定时提醒已完成，支持完整工单生命周期

@@ -69,13 +69,21 @@ def migrate_engineers_json_to_db():
 
 @api.on_event("startup")
 def on_startup():
-    """应用启动时：建库 → 建表 → 迁移工程师数据"""
+    """应用启动时：建库 -> 建表 -> 迁移工程师数据 -> 启动定时提醒"""
     try:
         create_database_if_not_exists()
         init_db()
         migrate_engineers_json_to_db()
     except Exception as e:
         print(f"[startup] ⚠️ 数据库初始化失败，将以降级模式运行：{e}")
+
+    # 启动定时提醒调度器
+    try:
+        from .scheduler import start_scheduler
+
+        start_scheduler()
+    except Exception as e:
+        print(f"[startup] ⚠️ 定时提醒启动失败：{e}")
 
 
 # ==================== API 接口 ====================

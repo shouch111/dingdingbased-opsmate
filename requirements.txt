@@ -19,3 +19,6 @@ dingtalk-stream>=0.7.0
 sqlalchemy>=2.0.0
 pymysql>=1.1.0
 cryptography>=42.0.0
+
+# 定时调度（重新提醒功能）
+apscheduler>=3.10.0
