@@ -146,6 +146,10 @@ WECHAT_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
 # 钉钉 Stream 模式（必配，用于接收单聊消息和自动回复）
 DINGTALK_CLIENT_ID=你的AppKey
 DINGTALK_CLIENT_SECRET=你的AppSecret
+
+# 定时提醒（可选，超时未解决自动提醒/转派）
+REMINDER_INTERVAL_MINUTES=30
+REMINDER_MAX_COUNT=3
 ```
 
 > **支持的 LLM 厂商：** DeepSeek / OpenAI / 通义千问 / 任何兼容 OpenAI API 格式的服务。
@@ -277,6 +281,29 @@ LLM 分析任务 -> 返回技能匹配的候选人列表
 
 ---
 
+## 定时提醒
+
+任务分配给工程师后，如果长时间未解决，系统会自动提醒并转派：
+
+```
+任务 assigned（已分配）
+  ↓ 30 分钟未回复「已解决」
+第 1 次提醒 → 钉钉私聊工程师
+  ↓ 30 分钟
+第 2 次提醒 → 钉钉私聊工程师
+  ↓ 30 分钟
+第 3 次提醒 → 钉钉私聊工程师
+  ↓ 30 分钟（已达上限 3 次）
+  ├─ 有其他工程师 → 自动转派（排除当前）→ 通知新工程师 + 提交人
+  └─ 仅一人 → 继续提醒 + 通知 IT 群人工介入
+```
+
+- **提醒间隔**和**最大次数**可在 `.env` 中配置
+- 提醒记录复用 feedbacks 表，不改数据库结构
+- 转派后新工程师的提醒计数自动重置为 0
+
+---
+
 ## API 接口
 
 ### POST /task
@@ -375,6 +402,8 @@ LLM 分析任务 -> 返回技能匹配的候选人列表
 | LLM 返回 404 | base_url 配错 | 检查 `.env` 的 `base_url` 是否为 LLM API 地址 |
 | 钉钉私聊通知发不出 | dingtalk_user_id 不正确 | 让工程师给机器人发消息，自动绑定 Staff ID |
 | 反馈未识别 | 关键词不在列表中 | 检查 `feedback.py` 中关键词定义，按需补充 |
+| 定时提醒未触发 | 调度器未启动 | 查看启动日志是否有 `[scheduler] ✅ 定时提醒已启动` |
+| 提醒间隔不对 | `.env` 配置有误 | 检查 `REMINDER_INTERVAL_MINUTES` 和 `REMINDER_MAX_COUNT` |
 
 ---
 
@@ -389,6 +418,7 @@ LLM 分析任务 -> 返回技能匹配的候选人列表
 | Embedding | HuggingFace (text2vec-base-chinese) | 免费、离线、中文优化 |
 | LLM | OpenAI 兼容 API | 换模型只需改 URL 和 Key |
 | Web 框架 | FastAPI | 异步、自带文档、部署简单 |
+| 定时调度 | APScheduler | 进程内后台调度，轻量无依赖 |
 
 ---
 
@@ -396,7 +426,7 @@ LLM 分析任务 -> 返回技能匹配的候选人列表
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| **v1.1.0** | 2026-07-09 | 定时重新提醒：超时提醒 + 自动转派 |
+| **v1.1.0** | 2026-07-10 | 定时重新提醒：超时提醒 + 自动转派 |
 | **v1.0.0** | 2026-07-09 | 第一次大改版：任务持久化 + 反馈闭环 + 负载均衡 |
 | v0.2.0 | 2026-06-15 | 钉钉 Stream 接入 |
 | v0.1.0 | 2026-06 | 初始版本 |
