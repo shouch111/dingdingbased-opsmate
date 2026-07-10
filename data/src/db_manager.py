@@ -157,6 +157,10 @@ def create_task(
     status: str,
     assigned_engineer: str = "",
     final_response: str = "",
+    intent: str = "",
+    complexity: str = "",
+    model_used: str = "",
+    raw_content: str = "",
 ) -> dict:
     """
     创建任务并返回字典。
@@ -175,6 +179,10 @@ def create_task(
             status=status,
             assigned_engineer=assigned_engineer,
             final_response=final_response,
+            intent=intent,
+            complexity=complexity,
+            model_used=model_used,
+            raw_content=raw_content,
         )
         _commit_and_refresh(session, task)
 
@@ -355,6 +363,10 @@ def _task_to_dict(t: Task) -> dict:
         "resolved_at": t.resolved_at.strftime("%Y-%m-%d %H:%M:%S")
         if t.resolved_at
         else "",
+        "intent": getattr(t, "intent", "") or "",
+        "complexity": getattr(t, "complexity", "") or "",
+        "model_used": getattr(t, "model_used", "") or "",
+        "raw_content": getattr(t, "raw_content", "") or "",
     }
 
 
@@ -475,3 +487,64 @@ def get_last_reminder_time(task_id: int, engineer_name: str) -> Optional[datetim
 def create_reminder(task_id: int, engineer_name: str) -> dict:
     """记录一次系统提醒（复用 feedbacks 表）"""
     return create_feedback(task_id, "unresolved", _reminder_key(engineer_name))
+
+
+# ==================== 记忆相关（新架构新增） ====================
+
+
+def create_memory(
+    task_id: int | None,
+    summary: str,
+    intent: str = "",
+    complexity: str = "",
+    model_used: str = "",
+    embedding_id: str = "",
+) -> dict:
+    """存储一条交互记忆"""
+    from .database import Memory
+
+    session = _get_session()
+    try:
+        mem = Memory(
+            task_id=task_id,
+            summary=summary,
+            intent=intent,
+            complexity=complexity,
+            model_used=model_used,
+            embedding_id=embedding_id,
+        )
+        _commit_and_refresh(session, mem)
+        return {
+            "id": mem.id,
+            "task_id": mem.task_id,
+            "summary": mem.summary,
+            "embedding_id": mem.embedding_id,
+        }
+    finally:
+        session.close()
+
+
+def list_memories(limit: int = 20) -> list[dict]:
+    """查询最近的记忆记录"""
+    from .database import Memory
+
+    session = _get_session()
+    try:
+        mems = (
+            session.query(Memory).order_by(Memory.created_at.desc()).limit(limit).all()
+        )
+        return [
+            {
+                "id": m.id,
+                "task_id": m.task_id,
+                "summary": m.summary,
+                "intent": m.intent,
+                "complexity": m.complexity,
+                "created_at": m.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                if m.created_at
+                else "",
+            }
+            for m in mems
+        ]
+    finally:
+        session.close()

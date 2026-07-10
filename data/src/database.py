@@ -123,6 +123,13 @@ class Task(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, comment="解决时间"
     )
+    # ★ 新架构新增字段
+    intent: Mapped[str] = mapped_column(String(50), default="", comment="意图")
+    complexity: Mapped[str] = mapped_column(String(20), default="", comment="复杂度")
+    model_used: Mapped[str] = mapped_column(
+        String(50), default="", comment="使用的AI模型"
+    )
+    raw_content: Mapped[str | None] = mapped_column(Text, comment="原始消息（脱敏后）")
 
 
 class Feedback(Base):
@@ -139,6 +146,29 @@ class Feedback(Base):
     )
     feedback_by: Mapped[str] = mapped_column(
         String(100), nullable=False, comment="反馈人"
+    )
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+
+
+class Memory(Base):
+    """★ 交互记忆（新架构：后处理层向量化存储）"""
+
+    __tablename__ = "memories"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    task_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="关联任务ID"
+    )
+    summary: Mapped[str] = mapped_column(
+        String(500), nullable=False, comment="query+answer 摘要"
+    )
+    intent: Mapped[str] = mapped_column(String(50), default="", comment="意图")
+    complexity: Mapped[str] = mapped_column(String(20), default="", comment="复杂度")
+    model_used: Mapped[str] = mapped_column(
+        String(50), default="", comment="使用的模型"
+    )
+    embedding_id: Mapped[str] = mapped_column(
+        String(100), default="", comment="向量库ID"
     )
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
 

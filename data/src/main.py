@@ -1,5 +1,8 @@
 """
-FastAPI 入口 —— 把 Agent 包装成 Web API。
+FastAPI 入口 -- 统一 API + 旧版 /task 兼容。
+
+新架构：POST /api/v1/message 为统一入口（预处理 -> AI -> 后处理）。
+旧版 POST /task 保留兼容。
 """
 
 import json
@@ -16,13 +19,12 @@ from pydantic import BaseModel
 
 from . import db_manager
 from .database import create_database_if_not_exists, init_db
-from .graph import agent_app
-from .models import AgentState, Task
+from .models import AgentState, MessageRequest, MessageResponse, Task
 
 api = FastAPI(title="运维任务分配 Agent")
 
 
-# ==================== 数据模型 ====================
+# ==================== 旧版数据模型（兼容） ====================
 
 
 class TaskRequest(BaseModel):
@@ -32,7 +34,7 @@ class TaskRequest(BaseModel):
 
 
 class TaskResponse(BaseModel):
-    status: str  # "auto_answered" 或 "assigned"
+    status: str
     difficulty: str
     response: str
     assigned_to: str | None = None
@@ -42,13 +44,9 @@ class TaskResponse(BaseModel):
 
 
 def migrate_engineers_json_to_db():
-    """
-    首次启动：将 engineers.json 导入数据库。
-    表已有数据则跳过，以 DB 数据为准。
-    """
+    """首次启动：将 engineers.json 导入数据库。"""
     json_path = Path(__file__).parent.parent / "engineers.json"
 
-    # 表已有数据，跳过
     if db_manager.count_engineers() > 0:
         print("[迁移] engineers 表已有数据，跳过 JSON 迁移")
         return
@@ -77,7 +75,6 @@ def on_startup():
     except Exception as e:
         print(f"[startup] ⚠️ 数据库初始化失败，将以降级模式运行：{e}")
 
-    # 启动定时提醒调度器
     try:
         from .scheduler import start_scheduler
 
@@ -86,15 +83,87 @@ def on_startup():
         print(f"[startup] ⚠️ 定时提醒启动失败：{e}")
 
 
-# ==================== API 接口 ====================
+# ==================== 新架构：统一消息入口 ====================
+
+
+@api.post("/api/v1/message", response_model=MessageResponse)
+async def handle_message(req: MessageRequest):
+    """
+    ★ 统一消息入口 -- 所有消息源（钉钉/API/Web）统一走此接口。
+
+    流程：预处理（脱敏+意图+复杂度）-> AI 处理（模型路由+工具）-> 后处理（入库+记忆）
+    """
+    from .ai_agent import ai_process
+    from .postprocess import postprocess
+    from .preprocess import preprocess
+
+    print(f"\n{'=' * 60}")
+    print(f"[message] 来源={req.source} 发送者={req.sender_name}")
+    print(f"[message] 内容={req.content[:80]}...")
+    print(f"{'=' * 60}")
+
+    # ① 预处理：脱敏 + 意图检测 + 复杂度检测
+    try:
+        pre = preprocess(req.content)
+    except Exception as e:
+        print(f"[message] 预处理失败：{e}")
+        return MessageResponse(response="处理出错，请重试。")
+
+    intent = pre["intent"]
+    complexity = pre["complexity"]
+    desensitized = pre["desensitized"]
+
+    # ② AI 处理：模型路由 + 意图注入 + 工具调用
+    try:
+        ai_result = ai_process(
+            desensitized_content=desensitized,
+            intent=intent,
+            complexity=complexity,
+            sender_id=req.sender_id,
+        )
+        ai_response = ai_result["response"]
+        model_used = ai_result["model_used"]
+    except Exception as e:
+        print(f"[message] AI 处理失败：{e}")
+        return MessageResponse(
+            intent=intent,
+            complexity=complexity,
+            response="处理出错，请联系 IT 工程师。",
+        )
+
+    # ③ 后处理：脱敏入库 + 总结 + 向量化记忆
+    try:
+        post = postprocess(
+            raw_query=req.content,
+            ai_response=ai_response,
+            intent=intent,
+            complexity=complexity,
+            model_used=model_used,
+            sender_name=req.sender_name,
+            sender_id=req.sender_id,
+        )
+    except Exception as e:
+        print(f"[message] 后处理失败：{e}")
+        post = {"task_no": "", "memory_saved": False, "response": ai_response}
+
+    return MessageResponse(
+        intent=intent,
+        complexity=complexity,
+        model_used=model_used,
+        response=post["response"],
+        task_no=post["task_no"],
+        memory_saved=post["memory_saved"],
+    )
+
+
+# ==================== 旧版接口（兼容保留） ====================
 
 
 @api.post("/task", response_model=TaskResponse)
 async def handle_task(req: TaskRequest):
-    """
-    接收任务，运行 Agent 工作流，返回结果。
-    """
-    # 构造初始状态
+    """旧版接口：接收任务，运行 LangGraph 工作流（兼容保留）。"""
+    from .graph import agent_app
+
     initial_state = AgentState(
         task=Task(
             title=req.title,
@@ -107,10 +176,8 @@ async def handle_task(req: TaskRequest):
         assigned_engineer="",
     )
 
-    # 运行工作流
     result = agent_app.invoke(initial_state)
 
-    # 判断状态
     if result["assigned_engineer"]:
         status = "assigned"
     else:
@@ -124,6 +191,9 @@ async def handle_task(req: TaskRequest):
     )
 
 
+# ==================== 管理接口 ====================
+
+
 @api.get("/health")
 async def health():
     return {"status": "ok"}
@@ -131,7 +201,6 @@ async def health():
 
 @api.get("/tasks")
 async def list_tasks(limit: int = 20):
-    """查询最近任务列表（调试/管理用）"""
     try:
         return {"tasks": db_manager.list_recent_tasks(limit)}
     except Exception as e:
@@ -140,10 +209,8 @@ async def list_tasks(limit: int = 20):
 
 @api.get("/engineers")
 async def list_engineers():
-    """查询工程师名单（调试/管理用）"""
     try:
         engineers = db_manager.load_engineers_from_db()
-        # 动态填充 current_load
         for e in engineers:
             e["current_load"] = db_manager.count_active_tasks(e["name"])
         return {"engineers": engineers}
@@ -151,21 +218,27 @@ async def list_engineers():
         return {"error": str(e), "engineers": []}
 
 
+@api.get("/memories")
+async def list_memories(limit: int = 20):
+    """查询最近的交互记忆（调试用）"""
+    try:
+        return {"memories": db_manager.list_memories(limit)}
+    except Exception as e:
+        return {"error": str(e), "memories": []}
+
+
 # ========== 启动方式 ==========
 if __name__ == "__main__":
     from .dingtalk_stream import start_stream_bot
 
-    # 是否启用钉钉 Stream
     enable_dingtalk = bool(os.getenv("DINGTALK_CLIENT_ID", ""))
 
     if enable_dingtalk:
         print("[启动] 在后台线程启动钉钉 Stream 连接...")
         thread = threading.Thread(
             target=start_stream_bot,
-            args=(agent_app,),
-            daemon=True,  # 主进程退出时自动关闭
+            daemon=True,
         )
         thread.start()
 
-    # FastAPI 主线程
     uvicorn.run("src.main:api", host="0.0.0.0", port=8000, reload=False)

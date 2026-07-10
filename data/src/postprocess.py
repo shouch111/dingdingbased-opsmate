@@ -1,0 +1,234 @@
+"""
+后处理层 -- 脱敏回答 + 入库 + 总结 + 向量化记忆。
+
+AI 处理完成后执行：
+1. 对 AI 回答做二次脱敏（AI 可能引用了敏感信息）
+2. 任务存库（脱敏版本）
+3. LLM 总结 query + answer
+4. 计算向量存入记忆库
+"""
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
+
+from . import db_manager
+from .config import LLM_API_KEY, LLM_BASE_URL
+from .preprocess import desensitize
+
+# ==================== 辅助函数 ====================
+
+
+def _extract_text(response) -> str:
+    """从 LLM 响应中安全提取文本"""
+    content = response.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                parts.append(item.get("text", str(item)))
+            else:
+                parts.append(str(item))
+        return "".join(parts)
+    return str(content)
+
+
+# ==================== 后处理主入口 ====================
+
+
+def postprocess(
+    raw_query: str,
+    ai_response: str,
+    intent: str,
+    complexity: str,
+    model_used: str,
+    sender_name: str,
+    sender_id: str,
+) -> dict:
+    """
+    后处理主入口：脱敏 -> 入库 -> 总结 -> 向量化。
+
+    返回 {task_no, memory_saved, response}
+    """
+    # 1. 对 AI 回答做二次脱敏
+    safe_response = desensitize(ai_response)
+
+    # 2. 脱敏后的 query 也存库
+    safe_query = desensitize(raw_query)
+
+    # 3. 判断任务状态
+    # 如果 AI 回答中包含"已分配"字样，说明分配了工程师 -> assigned
+    # 否则 -> auto_answered
+    if "已分配" in safe_response or "分配工程师" in safe_response:
+        status = "assigned"
+        difficulty = "hard"
+    elif intent in ("casual_chat",):
+        # 闲聊不入库
+        return {
+            "task_no": "",
+            "memory_saved": False,
+            "response": safe_response,
+        }
+    else:
+        status = "auto_answered"
+        difficulty = "easy" if complexity == "simple" else "hard"
+
+    # 4. 提取分配的工程师名（如果有）
+    assigned_engineer = _extract_engineer(safe_response)
+
+    # 5. 存库
+    task_no = ""
+    task_id = None
+    try:
+        task_dict = db_manager.create_task(
+            title=safe_query[:80],
+            description=safe_query,
+            submitted_by=sender_name,
+            submitter_id=sender_id,
+            difficulty=difficulty,
+            status=status,
+            assigned_engineer=assigned_engineer,
+            final_response=safe_response,
+            intent=intent,
+            complexity=complexity,
+            model_used=model_used,
+            raw_content=safe_query,
+        )
+        task_no = task_dict.get("task_no", "")
+        task_id = task_dict.get("id")
+        print(f"[postprocess] ✅ 任务已存库：{task_no}（{status}）")
+    except Exception as e:
+        print(f"[postprocess] ⚠️ 任务存库失败（不阻断流程）：{e}")
+
+    # 6. 总结 + 向量化
+    memory_saved = False
+    if task_id is not None:
+        try:
+            memory_saved = _summarize_and_vectorize(
+                safe_query, safe_response, task_id, intent, complexity, model_used
+            )
+        except Exception as e:
+            print(f"[postprocess] ⚠️ 记忆向量化失败：{e}")
+
+    # 7. 回答末尾附任务编号
+    if task_no:
+        safe_response = f"{safe_response}\n\n---\n📋 任务编号：**{task_no}**"
+
+    return {
+        "task_no": task_no,
+        "memory_saved": memory_saved,
+        "response": safe_response,
+    }
+
+
+# ==================== 辅助函数 ====================
+
+
+def _extract_engineer(response: str) -> str:
+    """从 AI 回答中提取分配的工程师名"""
+    if "已分配" not in response and "分配工程师" not in response:
+        return ""
+
+    # 尝试匹配"已分配工程师：XXX" 或 "分配给 **XXX**"
+    import re
+
+    patterns = [
+        r"已分配工程师[：:]\s*\**(.+?)\**",
+        r"分配给\s*\**(.+?)\**",
+        r"已分配给\s*\**(.+?)\**",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, response)
+        if match:
+            name = match.group(1).strip().rstrip("*").strip()
+            # 验证是否在工程师名单中
+            try:
+                engineer = db_manager.get_engineer_by_name(name)
+                if engineer:
+                    return name
+            except Exception:
+                pass
+    return ""
+
+
+def _summarize_and_vectorize(
+    query: str,
+    answer: str,
+    task_id: int,
+    intent: str,
+    complexity: str,
+    model_used: str,
+) -> bool:
+    """总结 query+answer 并向量化存储到记忆库"""
+    # 1. LLM 生成摘要
+    summary = _generate_summary(query, answer)
+    if not summary:
+        return False
+
+    print(f"[postprocess] 📝 摘要：{summary[:60]}...")
+
+    # 2. 向量化存储
+    from . import memory as memory_module
+
+    embedding_id = memory_module.save_memory(
+        summary=summary,
+        task_id=task_id,
+        metadata={"intent": intent, "complexity": complexity},
+    )
+
+    # 3. 记录到 DB
+    if embedding_id:
+        db_manager.create_memory(
+            task_id=task_id,
+            summary=summary,
+            intent=intent,
+            complexity=complexity,
+            model_used=model_used,
+            embedding_id=embedding_id,
+        )
+        return True
+
+    return False
+
+
+def _generate_summary(query: str, answer: str) -> str:
+    """用 LLM 生成 query+answer 的简短摘要"""
+    try:
+        llm = ChatOpenAI(
+            model="deepseek-chat",
+            base_url=LLM_BASE_URL,
+            api_key=SecretStr(LLM_API_KEY or ""),
+            temperature=0,
+            model_kwargs={"max_tokens": 100},
+        )
+
+        prompt = """请用一句话总结以下运维问答的核心内容（不超过50字）。
+格式：问题简述 -> 解决方案简述
+
+用户问题：
+{query}
+
+AI回答：
+{answer}
+
+只回复一句话摘要，不要其他内容。"""
+
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=prompt.format(query=query[:200], answer=answer[:500])
+                ),
+                HumanMessage(content="请生成摘要"),
+            ]
+        )
+
+        summary = _extract_text(response).strip()
+        return summary if summary else f"{query[:30]} -> {answer[:30]}"
+    except Exception as e:
+        print(f"[postprocess] LLM 摘要生成失败：{e}")
+        # 降级：截取前 50 字
+        return f"{query[:25]} -> {answer[:25]}"

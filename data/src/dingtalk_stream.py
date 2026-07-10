@@ -1,14 +1,17 @@
 """
-钉钉 Stream 模式 —— 接收单聊消息 + 回复。
-通过 WebSocket 长连接接收钉钉推送，无需公网 URL。
+钉钉 Stream 模式 -- 纯转发层（新架构）。
+
+新架构：钉钉 Stream 只负责收发消息，不处理业务逻辑。
+收到消息后转发给 API /api/v1/message，收到响应后回复用户。
+所有业务逻辑（预处理/AI/后处理）集中在 API 层。
 """
 
 import json
 import os
 from pathlib import Path
 
+import requests
 from dingtalk_stream import (
-    AckMessage,
     AsyncChatbotHandler,
     ChatbotMessage,
     Credential,
@@ -22,28 +25,25 @@ CLIENT_ID = os.getenv("DINGTALK_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("DINGTALK_CLIENT_SECRET", "")
 ENGINEERS_PATH = Path(__file__).parent.parent / "engineers.json"
 
+# API 转发地址（本地 FastAPI）
+API_MESSAGE_URL = "http://localhost:8000/api/v1/message"
+
 
 def _auto_fill_engineer_id(sender_nick: str, sender_id: str):
-    """
-    自动回填工程师的钉钉 UserID。
-    优先写 DB，DB 不可用时降级写 engineers.json。
-    """
+    """自动回填工程师的钉钉 UserID（优先写 DB，JSON 降级）。"""
     if not sender_id or not sender_nick:
         return
 
-    # 优先写 DB
     try:
         from . import db_manager
 
         if db_manager.save_engineer_dingtalk_id(sender_nick, sender_id):
-            print(f"[钉钉] 🔗 自动绑定：{sender_nick} → dingtalk_user_id={sender_id}")
+            print(f"[钉钉] 🔗 自动绑定：{sender_nick} -> dingtalk_user_id={sender_id}")
             return
-        # save 返回 False 可能是已绑定或不存在的工程师，都不需要再写 JSON
         return
     except Exception as e:
         print(f"[钉钉] ⚠️ DB 绑定失败，降级写 JSON：{e}")
 
-    # 降级：写 engineers.json
     if not ENGINEERS_PATH.exists():
         return
     try:
@@ -54,51 +54,34 @@ def _auto_fill_engineer_id(sender_nick: str, sender_id: str):
             if e.get("name") == sender_nick and not e.get("dingtalk_user_id"):
                 e["dingtalk_user_id"] = sender_id
                 updated = True
-                print(f"[钉钉] 🔗 自动绑定(JSON)：{sender_nick} → {sender_id}")
+                print(f"[钉钉] 🔗 自动绑定(JSON)：{sender_nick} -> {sender_id}")
         if updated:
             with open(ENGINEERS_PATH, "w", encoding="utf-8") as f:
                 json.dump(engineers, f, ensure_ascii=False, indent=2)
-            print(f"[钉钉] ✅ 已保存 engineers.json")
     except Exception as ex:
         print(f"[钉钉] ❌ JSON 绑定也失败：{ex}")
 
 
 class OpsAgentChatbot(AsyncChatbotHandler):
     """
-    运维 Agent 聊天机器人处理器。
-    继承 AsyncChatbotHandler，重写 process 方法（同步）。
-    SDK 会在后台线程池中执行 process，适合 LLM 长耗时操作。
-    AsyncChatbotHandler.raw_process 会在线程池中调用 self.process()，
-    并立即向钉钉返回 ACK_OK，不会阻塞消息确认。
+    运维 Agent 聊天机器人处理器（纯转发层）。
+    收到消息后转发给 API，收到响应后回复用户。
     """
 
-    def __init__(self, agent_app):
-        super().__init__()
-        self.agent_app = agent_app
-
     def process(self, callback_message):
-        """
-        SDK 在后台线程中调用。
-        先判断是否为反馈消息（反馈闭环），再决定走新任务流程。
-        """
-        # 1. 从 CallbackMessage.data 中解析出 ChatbotMessage
+        """收到钉钉消息 -> 转发给 API -> 回复用户"""
         incoming_message = ChatbotMessage.from_dict(callback_message.data)
 
         sender_nick = incoming_message.sender_nick or "用户"
-        conversation_type = incoming_message.conversation_type
-        print(
-            f"[钉钉 DEBUG] process 被调用！发送者: {sender_nick}, 会话类型: {conversation_type}"
-        )
+        print(f"[钉钉] 收到消息：{sender_nick}")
 
-        # 自动回填工程师的钉钉 UserID（仅在首次匹配时写入）
+        # 自动回填工程师的钉钉 UserID
         sender_id = getattr(incoming_message, "sender_id", "")
         sender_staff_id = getattr(incoming_message, "sender_staff_id", "")
-        print(f"[钉钉] 🆔 sender_id={sender_id}, sender_staff_id={sender_staff_id}")
-        # 私聊 API 需要 staff_id，优先用它；若无则回退到 sender_id
         bind_id = sender_staff_id or sender_id
         _auto_fill_engineer_id(sender_nick, bind_id)
 
-        # 2. 提取文本
+        # 提取文本
         text_list = incoming_message.get_text_list()
         if not text_list:
             print(f"[钉钉] 非文本消息（来自 {sender_nick}），已忽略")
@@ -108,66 +91,40 @@ class OpsAgentChatbot(AsyncChatbotHandler):
         if not question:
             return
 
-        print(f"[钉钉] 收到 {sender_nick} 的提问：{question[:80]}...")
+        print(f"[钉钉] 转发给 API：{question[:80]}...")
 
-        # 3. ★ 反馈闭环判断：先检查是否为反馈消息
-        feedback_result = None
+        # ★ 转发给 API（纯转发，不处理业务）
         try:
-            from . import feedback
-
-            feedback_result = feedback.handle_message(sender_nick, bind_id, question)
+            resp = requests.post(
+                API_MESSAGE_URL,
+                json={
+                    "source": "dingtalk",
+                    "sender_id": bind_id,
+                    "sender_name": sender_nick,
+                    "content": question,
+                    "metadata": {"staff_id": sender_staff_id},
+                },
+                timeout=120,  # LLM 可能需要较长时间
+            )
+            result = resp.json()
+            reply = result.get("response", "处理出错，请重试。")
+        except requests.exceptions.Timeout:
+            print(f"[钉钉] API 转发超时")
+            reply = "处理超时，请稍后重试，或联系 IT 工程师。"
         except Exception as e:
-            print(f"[钉钉] 反馈判断异常，走新任务流程：{e}")
-
-        if feedback_result and feedback_result.get("is_feedback"):
-            # 是反馈消息 → 直接回复反馈结果，不走 Agent
-            reply = feedback_result["reply"]
-            try:
-                self.reply_markdown("运维助手", reply, incoming_message)
-                print(f"[钉钉] 已回复 {sender_nick}（反馈处理）")
-            except Exception as e:
-                print(f"[钉钉] 回复发送失败：{e}")
-            return
-
-        # 4. 不是反馈 → 走新任务流程
-        from .models import AgentState, Task
-
-        state = AgentState(
-            task=Task(
-                title=question[:80],
-                description=question,
-                submitted_by=sender_nick,
-            ),
-            difficulty=None,
-            knowledge_context="",
-            final_response="",
-            assigned_engineer="",
-            submitter_id=bind_id,  # ★ 记录提交人钉钉 ID，供反馈追踪用
-        )
-
-        # 5. 运行 Agent
-        difficulty = "?"
-        try:
-            result = self.agent_app.invoke(state)
-            reply = result["final_response"]
-            difficulty = result.get("difficulty", "?")
-        except Exception as e:
-            print(f"[钉钉] Agent 执行失败：{e}")
+            print(f"[钉钉] API 转发失败：{e}")
             reply = "处理出错，请联系 IT 工程师。"
 
-        # 6. 使用 SDK 内置方法回复用户
+        # 回复用户
         try:
             self.reply_markdown("运维助手", reply, incoming_message)
-            print(f"[钉钉] 已回复 {sender_nick}（难度：{difficulty}）")
+            print(f"[钉钉] 已回复 {sender_nick}")
         except Exception as e:
             print(f"[钉钉] 回复发送失败：{e}")
 
 
-def start_stream_bot(agent_app):
-    """
-    启动钉钉 Stream 长连接，阻塞运行。
-    与 FastAPI 在不同线程中运行。
-    """
+def start_stream_bot():
+    """启动钉钉 Stream 长连接，阻塞运行。"""
     print(
         f"[钉钉 Stream] CLIENT_ID={CLIENT_ID[:6]}***"
         if CLIENT_ID
@@ -177,16 +134,12 @@ def start_stream_bot(agent_app):
 
     if not CLIENT_ID or not CLIENT_SECRET:
         print("[钉钉 Stream] 未配置 CLIENT_ID / CLIENT_SECRET，跳过启动。")
-        print("[钉钉 Stream] 请在 .env 文件中添加以下配置：")
-        print("[钉钉 Stream]   DINGTALK_CLIENT_ID=你的AppKey")
-        print("[钉钉 Stream]   DINGTALK_CLIENT_SECRET=你的AppSecret")
         return
 
     credential = Credential(CLIENT_ID, CLIENT_SECRET)
     client = DingTalkStreamClient(credential)
-    handler = OpsAgentChatbot(agent_app)
+    handler = OpsAgentChatbot()
 
-    # 使用 SDK 内置的 ChatbotMessage.TOPIC 常量注册，确保 topic 精确匹配
     client.register_callback_handler(ChatbotMessage.TOPIC, handler)
 
     print(f"[钉钉 Stream] 正在连接（topic: {ChatbotMessage.TOPIC}）...")
