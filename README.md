@@ -1,440 +1,492 @@
-# 🛠️ Ops Agent -- 运维任务智能分配系统
-
-一个基于 **LangGraph + FastAPI + ChromaDB + MySQL** 的智能运维任务分配 Agent。
-
-> **核心能力：** 钉钉 Stream 单聊接入，简单问题自动回答，困难任务负载均衡匹配工程师并私聊通知，支持用户/工程师双向反馈闭环，任务全生命周期持久化追踪。
-
----
-
-## 架构概览
-
-```mermaid
-flowchart TD
-    U[👤 用户提交任务] --> API[FastAPI :8000]
-    U2[👤 钉钉消息] --> FB
-
-    subgraph FEEDBACK[反馈闭环 feedback.py]
-        FB["🔍 handle_message\n识别身份+检测反馈意图"]
-        FB -->|是反馈| FBC["处理反馈\n升级/催办/关闭"]
-        FB -->|新任务| CLASSIFY
-    end
-
-    API --> CLASSIFY
-
-    subgraph WORKFLOW[LangGraph 工作流]
-        CLASSIFY["🔍 classify_node\nLLM 分类难度"]
-        CLASSIFY --> ROUTE{简单 or 困难?}
-        ROUTE -->|easy| RETRIEVE["📚 retrieve_node\n检索本地知识库"]
-        ROUTE -->|hard| ASSIGN["👷 assign_node\n负载均衡匹配工程师"]
-        RETRIEVE --> ANSWER["💬 answer_node\n生成回答 + 存库"]
-        ASSIGN --> NOTIFY["📢 钉钉私聊+群通知 + 存库"]
-        ANSWER --> OUT[返回结果]
-        NOTIFY --> OUT
-    end
-
-    CLASSIFY -.-> LLM[🤖 LLM API\nDeepSeek / OpenAI]
-    RETRIEVE -.-> KB[("🗄️ ChromaDB\n向量知识库")]
-    ANSWER -.-> LLM
-    ASSIGN -.-> LLM
-    ASSIGN -.-> LB["⚖️ assign_engineer\nLLM筛技能+算法做负载均衡"]
-    FBC -.-> LB
-    LB -.-> DB[("🗄️ MySQL\n任务/工程师/反馈")]
-    ASSIGN -.-> DB
-    ANSWER -.-> DB
-    FBC -.-> DB
-
-    OUT --> API --> U
-    FBC --> U2
-```
-
-### 任务状态机
-
-```
-┌────────────────┐     用户反馈"未解决"      ┌──────────────┐     工程师回复"已解决"     ┌──────────┐
-│ auto_answered  │ ─────────────────────────-> │   assigned   │ ───────────────────────-> │ resolved │
-│  (自动已回答)   │                             │  (已分配)     │                           │  (已解决)  │
-└────────────────┘                             └──────────────┘                           └──────────┘
-        │                                           │
-        │ 用户反馈"已解决"                            │ 用户反馈"未解决"-> 重新催办
-        └───────────────────────────────────────────┘
-```
-
----
-
-## 项目结构
-
-```
-ops-agent/
-├── README.md                 ← 本文档
-├── requirements.txt          ← Python 依赖
-├── .gitignore
-├── .env.example              ← 环境变量模板（可提交）
-├── CHANGELOG.md              ← 更新日志
-├── 运维Agent框架文档.md       ← 框架设计文档（含版本控制）
-├── 第一阶段需求文档.md        ← 第一阶段需求设计文档
-│
-└── data/                     ← 数据与代码
-    ├── .env                  ← 实际环境变量（不提交！）
-    ├── engineers.json        ← 工程师名单（首次启动自动迁移到 DB）
-    │
-    ├── knowledge/            ← 知识库文档
-    │   ├── printer.md        ← 打印机故障
-    │   ├── vpn.md            ← VPN 问题
-    │   └── ...
-    │
-    ├── chroma_db/            ← 向量数据库（自动生成）
-    │
-    └── src/                  ← 源代码
-        ├── __init__.py
-        ├── models.py         ← 数据结构定义（Pydantic）
-        ├── database.py       ← SQLAlchemy 连接 + ORM 模型定义
-        ├── db_manager.py     ← 数据库 CRUD 操作封装
-        ├── tools.py          ← 工具函数（知识库检索、工程师加载）
-        ├── graph.py          ← LangGraph 工作流（核心调度 + 负载均衡）
-        ├── feedback.py       ← 反馈识别与处理（反馈闭环）
-        ├── scheduler.py       ← 定时提醒调度器（超时提醒/转派）
-        ├── dingtalk_stream.py← 钉钉 Stream 单聊机器人 + 消息路由
-        └── main.py           ← FastAPI 入口 + 钉钉启动 + 启动初始化
-```
-
----
-
-## 快速开始
-
-### 1. 环境要求
-
-- Python 3.10+
-- MySQL 8.0+（首次启动自动建库建表）
-- 一个 LLM API Key（[DeepSeek](https://platform.deepseek.com) 推荐，便宜好用）
-- Windows / macOS / Linux
-
-### 2. 安装依赖
-
-```bash
-git clone <your-repo-url>
-cd ops-agent
-pip install -r requirements.txt
-```
-
-### 3. 配置环境变量
-
-复制模板并编辑：
-
-```bash
-cp .env.example data/.env
-# 编辑 data/.env，填入你的 LLM API 和 MySQL 信息
-```
-
-`.env` 内容：
-
-```env
-# LLM API 配置（必填）
-open_code_go_api=sk-你的API密钥
-model=deepseek-chat
-base_url=https://api.deepseek.com
-
-# MySQL 数据库配置（必填，首次启动自动建库建表）
-MYSQL_HOST=localhost
-MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=你的密码
-MYSQL_DATABASE=ops_agent
-
-# 企业微信通知（可选，不配也能跑）
-WECHAT_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
-
-# 钉钉 Stream 模式（必配，用于接收单聊消息和自动回复）
-DINGTALK_CLIENT_ID=你的AppKey
-DINGTALK_CLIENT_SECRET=你的AppSecret
-
-# 定时提醒（可选，超时未解决自动提醒/转派）
-REMINDER_INTERVAL_MINUTES=30
-REMINDER_MAX_COUNT=3
-```
-
-> **支持的 LLM 厂商：** DeepSeek / OpenAI / 通义千问 / 任何兼容 OpenAI API 格式的服务。
-
-### 4. 准备知识库
-
-在 `data/knowledge/` 下创建 `.md` 文件，格式：
-
-```markdown
-# 问题标题
-
-## 症状
-- 症状描述
-
-## 解决步骤
-1. 第一步
-2. 第二步
-```
-
-### 5. 配置工程师名单
-
-编辑 `data/engineers.json`（首次启动后自动迁移到数据库）：
-
-```json
-[
-  {
-    "name": "张三",
-    "skills": ["打印机", "电脑硬件", "Windows系统"],
-    "mobile": "13800000001",
-    "dingtalk_user_id": "",
-    "available": true
-  },
-  {
-    "name": "李四",
-    "skills": ["网络", "VPN", "防火墙"],
-    "mobile": "13800000002",
-    "dingtalk_user_id": "",
-    "available": true
-  }
-]
-```
-
-> 💡 `dingtalk_user_id` 可以留空，工程师首次给机器人发消息后会自动回填到数据库。
-> 💡 `current_load` 无需配置，系统会动态查询活跃任务数自动计算。
-
-### 6. 启动
-
-```bash
-cd data
-python -m src.main
-```
-
-启动时会自动：建库 -> 建表 -> 迁移工程师数据 -> 启动 FastAPI + 钉钉 Stream
-
-看到 `Uvicorn running on http://0.0.0.0:8000` 即启动成功。
-
-### 7. 测试
-
-```bash
-# 健康检查
-curl http://localhost:8000/health
-
-# 查询任务列表
-curl http://localhost:8000/tasks
-
-# 查询工程师名单（含动态负载）
-curl http://localhost:8000/engineers
-
-# 简单任务（应自动回答）
-curl -X POST http://localhost:8000/task \
-  -H "Content-Type: application/json" \
-  -d '{"title":"打印机连不上","description":"惠普打印机离线","submitted_by":"小明"}'
-
-# 困难任务（应分配给工程师）
-curl -X POST http://localhost:8000/task \
-  -H "Content-Type: application/json" \
-  -d '{"title":"数据库宕机","description":"MySQL主库崩溃","submitted_by":"运维"}'
-```
-
----
-
-## 钉钉单聊机器人
-
-项目已内置钉钉 Stream 模式支持，启动后自动连接钉钉 WebSocket 长连接。
-
-### 接入步骤
-
-1. 在 [钉钉开放平台](https://open.dingtalk.com) 创建企业应用，获取 AppKey 和 AppSecret
-2. 在 `.env` 中填入 `DINGTALK_CLIENT_ID` 和 `DINGTALK_CLIENT_SECRET`
-3. 在 `engineers.json` 中预填工程师信息（姓名、技能、手机），`dingtalk_user_id` 留空
-4. 启动服务 -> 让每位工程师给机器人发一条消息 -> UserID 自动回填到数据库
-
-### 工程师 ID 自动绑定
-
-工程师首次给机器人发消息时，系统会自动将钉钉 UserID 写入数据库，
-后续困难任务即可通过钉钉私聊通知对应工程师。
-
----
-
-## 反馈闭环
-
-系统支持用户和工程师的双向反馈，形成完整的工单生命周期：
-
-| 反馈场景 | 处理方式 |
-|---------|---------|
-| 用户回复"搞定了/好了" | 自动关闭任务（auto_answered -> resolved） |
-| 用户回复"还是不行/没解决" | auto_answered 升级分配工程师；assigned 重新催办 |
-| 工程师回复"已解决/搞定" | 标记任务已解决 + 私聊通知提交人 |
-
-反馈识别采用关键词匹配，不消耗 LLM 调用。消息路由优先判断反馈，再决定是否走新任务流程。
-
----
-
-## 负载均衡
-
-工程师分配采用混合策略：**LLM 筛技能 + 算法做负载均衡**
-
-```
-LLM 分析任务 -> 返回技能匹配的候选人列表
-  ↓
-算法从候选人中选 current_load 最低 & available=true 的
-  ↓
-优先分配没有任务的工程师，同负载随机选择
-```
-
-- **LLM 负责"谁会做"**：根据任务描述返回技能匹配的候选人
-- **算法负责"谁来做"**：从候选人中选负载最低的在岗工程师
-- 全部不在岗时仍从匹配人选最低负载（通知后等待）
-
----
-
-## 定时提醒
-
-任务分配给工程师后，如果长时间未解决，系统会自动提醒并转派：
-
-```
-任务 assigned（已分配）
-  ↓ 30 分钟未回复「已解决」
-第 1 次提醒 → 钉钉私聊工程师
-  ↓ 30 分钟
-第 2 次提醒 → 钉钉私聊工程师
-  ↓ 30 分钟
-第 3 次提醒 → 钉钉私聊工程师
-  ↓ 30 分钟（已达上限 3 次）
-  ├─ 有其他工程师 → 自动转派（排除当前）→ 通知新工程师 + 提交人
-  └─ 仅一人 → 继续提醒 + 通知 IT 群人工介入
-```
-
-- **提醒间隔**和**最大次数**可在 `.env` 中配置
-- 提醒记录复用 feedbacks 表，不改数据库结构
-- 转派后新工程师的提醒计数自动重置为 0
-
----
-
-## API 接口
-
-### POST /task
-
-**请求：**
-```json
-{
-  "title": "打印机无法连接",
-  "description": "惠普打印机突然显示离线状态",
-  "submitted_by": "小明"
-}
-```
-
-**响应（简单任务）：**
-```json
-{
-  "status": "auto_answered",
-  "difficulty": "easy",
-  "response": "请按以下步骤操作：\n1. 检查电源...\n\n📋 任务编号：T1001（如未解决请回复"未解决"）",
-  "assigned_to": null
-}
-```
-
-**响应（困难任务）：**
-```json
-{
-  "status": "assigned",
-  "difficulty": "hard",
-  "response": "已分配给 **王五**。\n分配原因：需要数据库技能...\n\n📋 任务编号：T1002",
-  "assigned_to": "王五"
-}
-```
-
-### GET /tasks
-
-查询最近任务列表（默认 20 条），返回任务编号、状态、分配工程师等信息。
-
-### GET /engineers
-
-查询工程师名单，含动态计算的 `current_load`（当前活跃任务数）。
-
-### GET /health
-
-健康检查。
-
----
-
-## 扩展指南
-
-### 对接钉钉群通知
-
-已内置群 Webhook 通知支持。在 `.env` 中配置 `DINGTALK_WEBHOOK` 后，
-困难任务会自动在群里发送简报并 @ 对应工程师。
-
-### 对接企业微信
-
-已内置支持，只需在 `.env` 中配置 `WECHAT_WEBHOOK`。
-
-### 增加新知识
-
-往 `data/knowledge/` 添加 `.md` 文件即可，系统支持增量热更新，无需重启。
-
-### 增加工程师
-
-启动后工程师数据存储在 MySQL `engineers` 表中。可通过 API 或直接操作数据库增删改，下次请求自动生效。
-
-### 增加「中等难度」分类
-
-1. `models.py` 的 `Difficulty` 枚举加 `MEDIUM = "medium"`
-2. `graph.py` 的 `CLASSIFY_PROMPT` 加 medium 定义
-3. `route_after_classify` 加 medium 分支（例如：中等任务先检索知识库，LLM 确认后再决定自动回复还是转人工）
-
----
-
-## 让 AI 理解本项目
-
-如果你想用 AI 编程工具（Cursor / Windsurf / Copilot）继续开发，把这些上下文告诉 AI：
-
-> 这是一个基于 LangGraph + MySQL 的运维任务分配 Agent。接入钉钉 Stream 模式（dingtalk_stream.py），通过 WebSocket 接收单聊消息。消息路由：feedback.py 先判断是否为反馈（关键词匹配），是反馈则直接处理（升级/催办/关闭），不是反馈才走 Agent 工作流。工作流：classify_node 分类难度 -> easy 走 retrieve_node + answer_node 自动回复并存库，hard 走 assign_node 调用 assign_engineer() 负载均衡匹配工程师并私聊通知。负载均衡策略：LLM 返回候选人列表 + 算法选最低负载。任务状态机：auto_answered -> assigned -> resolved。数据库用 MySQL + SQLAlchemy 2.0，db_manager.py 封装全部 CRUD。工程师首次发消息自动回填 dingtalk_user_id 到 DB。知识库用 ChromaDB + HuggingFace 本地 embedding，LLM 用 OpenAI 兼容 API。入口是 main.py 的 FastAPI + 钉钉 Stream，启动时自动建库建表 + 迁移 engineers.json。
-
-把 `README.md` 和 `运维Agent框架文档.md` 一起作为 AI 的上下文引用，AI 就能准确理解项目。
-
----
-
-## 常见问题
-
-| 问题 | 原因 | 解决 |
-|------|------|------|
-| 启动报 ModuleNotFoundError | 依赖未装 | `pip install -r requirements.txt` |
-| 数据库连接失败 | MySQL 未启动或密码错误 | 检查 MySQL 服务 + `.env` 中 MYSQL 配置 |
-| 数据库表未创建 | 首次启动初始化失败 | 查看启动日志，确认 `init_db()` 执行成功 |
-| 工程师名单为空 | DB 迁移未执行 | 确认 `engineers.json` 存在，重启触发迁移 |
-| 中文显示乱码 | PowerShell 编码问题 | 用 `curl.exe` 或 Python `requests` 测试 |
-| embedding 模型下载失败 | HuggingFace 被墙 | 已配置 `hf-mirror.com` 镜像 |
-| 知识库检索不到 | 向量库未重建 | 删 `chroma_db/` 后重启 |
-| LLM 返回 404 | base_url 配错 | 检查 `.env` 的 `base_url` 是否为 LLM API 地址 |
-| 钉钉私聊通知发不出 | dingtalk_user_id 不正确 | 让工程师给机器人发消息，自动绑定 Staff ID |
-| 反馈未识别 | 关键词不在列表中 | 检查 `feedback.py` 中关键词定义，按需补充 |
-| 定时提醒未触发 | 调度器未启动 | 查看启动日志是否有 `[scheduler] ✅ 定时提醒已启动` |
-| 提醒间隔不对 | `.env` 配置有误 | 检查 `REMINDER_INTERVAL_MINUTES` 和 `REMINDER_MAX_COUNT` |
-
----
-
-## 技术栈
-
-| 组件 | 选型 | 原因 |
-|------|------|------|
-| Agent 框架 | LangGraph | 显式状态图，比黑盒 Agent 更可控 |
-| 向量数据库 | ChromaDB | 轻量、零配置、本地运行 |
-| 关系型数据库 | MySQL | 生产级、并发好、任务持久化 |
-| ORM | SQLAlchemy 2.0 | Mapped 风格类型安全，社区成熟 |
-| Embedding | HuggingFace (text2vec-base-chinese) | 免费、离线、中文优化 |
-| LLM | OpenAI 兼容 API | 换模型只需改 URL 和 Key |
-| Web 框架 | FastAPI | 异步、自带文档、部署简单 |
-| 定时调度 | APScheduler | 进程内后台调度，轻量无依赖 |
-
----
-
-## 版本
-
-| 版本 | 日期 | 说明 |
-|------|------|------|
-| **v1.1.0** | 2026-07-10 | 定时重新提醒：超时提醒 + 自动转派 |
-| **v1.0.0** | 2026-07-09 | 第一次大改版：任务持久化 + 反馈闭环 + 负载均衡 |
-| v0.2.0 | 2026-06-15 | 钉钉 Stream 接入 |
-| v0.1.0 | 2026-06 | 初始版本 |
-
-详见 `运维Agent框架文档.md` 第十一章「版本控制」和 `CHANGELOG.md`。
-
----
-
-## License
-
-MIT
+# 🛠️ Ops Agent -- 运维任务智能处理系统
+
+一个基于 **FastAPI + LangChain + ChromaDB + MySQL** 的智能运维任务处理系统。
+
+> **核心能力：** 统一 API 入口，消息预处理（脱敏+意图+复杂度），按复杂度路由不同 AI 模型，单 Agent + 工具调用，交互记忆持久化，钉钉 Stream 接入。
+
+---
+
+## 架构概览
+
+```mermaid
+flowchart TD
+    DT[📱 钉钉消息] --> STREAM[钉钉 Stream\n纯转发]
+    API_USER[👤 API/用户消息] --> MSG
+    STREAM --> MSG["POST /api/v1/message\n统一入口"]
+
+    MSG --> PRE
+
+    subgraph PREPROCESS[预处理层 preprocess.py]
+        PRE["① 预处理"]
+        PRE --> MASK["脱敏\n手机/IP/邮箱/身份证/密码"]
+        MASK --> INTENT["意图检测\n报障/闲聊/反馈/转人工/查询"]
+        INTENT --> CPLX["复杂度检测\nsimple/medium/hard"]
+    end
+
+    CPLX --> AI
+
+    subgraph AILAYER[AI 处理层 ai_agent.py]
+        AI["② AI 处理"]
+        AI --> ROUTE["模型路由\nsimple→deepseek-chat\nhard→deepseek-reasoner"]
+        ROUTE --> CTX["意图注入 System Prompt"]
+        CTX --> TOOLS["单 Agent + 工具调用"]
+        TOOLS --> T1["🕐 get_current_time"]
+        TOOLS --> T2["📚 search_knowledge"]
+        TOOLS --> T3["🧠 search_memory"]
+        TOOLS --> T4["👷 assign_engineer"]
+        TOOLS --> T5["📋 query_user_tasks"]
+    end
+
+    TOOLS --> POST
+
+    subgraph POSTPROCESS[后处理层 postprocess.py]
+        POST["③ 后处理"]
+        POST --> SAFE["脱敏回答"]
+        SAFE --> STORE["入库\nintent/complexity/model"]
+        STORE --> SUM["LLM 总结 query+answer"]
+        SUM --> VEC["向量化存储\n持久化记忆"]
+    end
+
+    VEC --> RESP[响应返回]
+    RESP --> STREAM
+    RESP --> API_USER
+
+    T2 -.-> KB[("🗄️ ChromaDB\n知识库")]
+    T3 -.-> MEM[("🧠 ChromaDB\n记忆库")]
+    T4 -.-> ENG[("👥 engineers\n负载均衡")]
+    STORE -.-> DB[("🗄️ MySQL\n任务/工程师/反馈/记忆")]
+```
+
+### 三层架构说明
+
+| 层 | 模块 | 职责 |
+|----|------|------|
+| **预处理层** | `preprocess.py` | 脱敏（5类正则）+ 意图检测（6种意图）+ 复杂度检测（3档），规则优先 + 轻量 LLM 兜底 |
+| **AI 处理层** | `ai_agent.py` + `agent_tools.py` | 按复杂度路由模型，意图注入上下文，单 Agent 自主调用工具（不做多节点编排） |
+| **后处理层** | `postprocess.py` + `memory.py` | 二次脱敏 + 入库 + LLM 总结 + 向量化持久化记忆 |
+
+---
+
+## 项目结构
+
+```
+ops-agent/
+├── README.md                 ← 本文档
+├── requirements.txt          ← Python 依赖
+├── .env.example              ← 环境变量模板
+├── CHANGELOG.md              ← 更新日志
+├── 新版架构方案.md            ← v2.0 架构设计文档
+├── 运维Agent框架文档.md       ← 框架设计文档（含版本控制）
+├── 第一阶段需求文档.md        ← 第一阶段需求设计文档
+│
+└── data/                     ← 数据与代码
+    ├── .env                  ← 实际环境变量（不提交！）
+    ├── engineers.json        ← 工程师名单（首次启动自动迁移到 DB）
+    ├── knowledge/            ← 知识库文档（skill 文档）
+    ├── chroma_db/            ← 知识库向量存储（自动生成）
+    ├── memory_db/            ← ★ 交互记忆向量存储（自动生成）
+    │
+    └── src/                  ← 源代码
+        ├── __init__.py
+        │
+        ├── config.py         ← ★ 模型路由配置
+        ├── models.py         ← 数据结构定义（Intent/Complexity/MessageRequest）
+        ├── database.py       ← ORM 模型（Engineer/Task/Feedback/Memory）
+        ├── db_manager.py     ← 数据库 CRUD 封装
+        ├── tools.py          ← 知识库检索工具
+        │
+        ├── preprocess.py     ← ★ 预处理层（脱敏+意图+复杂度）
+        ├── ai_agent.py       ← ★ AI 处理层（模型路由+工具调用）
+        ├── agent_tools.py    ← ★ AI 工具定义（time/knowledge/memory/assign）
+        ├── postprocess.py    ← ★ 后处理层（脱敏入库+总结+向量化）
+        ├── memory.py         ← ★ 交互记忆管理（向量存储+检索）
+        │
+        ├── dingtalk_stream.py← 钉钉 Stream（纯转发层）
+        ├── scheduler.py      ← 定时提醒调度器（超时提醒/转派）
+        ├── graph.py          ← 旧版 LangGraph 工作流（兼容保留）
+        ├── feedback.py       ← 旧版反馈处理（兼容保留）
+        └── main.py           ← FastAPI 入口（统一 API + 旧版兼容）
+```
+
+> ★ 标记为 v2.0 新架构新增模块
+
+---
+
+## 快速开始
+
+### 1. 环境要求
+
+- Python 3.10+
+- MySQL 8.0+（首次启动自动建库建表）
+- 一个 LLM API Key（[DeepSeek](https://platform.deepseek.com) 推荐）
+- Windows / macOS / Linux
+
+### 2. 安装依赖
+
+```bash
+git clone <your-repo-url>
+cd ops-agent
+pip install -r requirements.txt
+```
+
+### 3. 配置环境变量
+
+```bash
+cp .env.example data/.env
+# 编辑 data/.env
+```
+
+```env
+# ========== LLM API（必填）==========
+open_code_go_api=sk-你的API密钥
+model=deepseek-chat
+base_url=https://api.deepseek.com
+
+# ========== MySQL（必填，首次启动自动建库建表）==========
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=你的密码
+MYSQL_DATABASE=ops_agent
+
+# ========== 模型路由（新架构，可选，有默认值）==========
+MODEL_SIMPLE=deepseek-chat
+MODEL_MEDIUM=deepseek-chat
+MODEL_HARD=deepseek-reasoner
+
+# ========== 预处理（可选）==========
+INTENT_LLM_FALLBACK=true
+
+# ========== 记忆系统（可选）==========
+MEMORY_ENABLED=true
+MEMORY_DB_PATH=data/memory_db
+MEMORY_SEARCH_TOP_K=3
+
+# ========== 钉钉 Stream（可选）==========
+DINGTALK_CLIENT_ID=你的AppKey
+DINGTALK_CLIENT_SECRET=你的AppSecret
+
+# ========== 定时提醒（可选）==========
+REMINDER_INTERVAL_MINUTES=30
+REMINDER_MAX_COUNT=3
+```
+
+### 4. 准备知识库
+
+在 `data/knowledge/` 下创建 `.md` 文件：
+
+```markdown
+# 问题标题
+
+## 症状
+- 症状描述
+
+## 解决步骤
+1. 第一步
+2. 第二步
+```
+
+### 5. 配置工程师名单
+
+编辑 `data/engineers.json`（首次启动自动迁移到数据库）：
+
+```json
+[
+  {
+    "name": "张三",
+    "skills": ["打印机", "电脑硬件", "Windows系统"],
+    "mobile": "13800000001",
+    "dingtalk_user_id": "",
+    "available": true
+  }
+]
+```
+
+### 6. 启动
+
+```bash
+cd data
+python -m src.main
+```
+
+启动时自动：建库 -> 建表 -> 迁移工程师数据 -> 启动定时提醒 -> 启动 FastAPI + 钉钉 Stream
+
+### 7. 测试
+
+```bash
+# ★ 新架构统一入口（推荐）
+curl -X POST http://localhost:8000/api/v1/message \
+  -H "Content-Type: application/json" \
+  -d '{"source":"api","sender_name":"小明","content":"打印机连不上"}'
+
+# 健康检查
+curl http://localhost:8000/health
+
+# 查询任务列表
+curl http://localhost:8000/tasks
+
+# 查询工程师名单
+curl http://localhost:8000/engineers
+
+# 查询交互记忆
+curl http://localhost:8000/memories
+```
+
+---
+
+## 预处理层
+
+消息进入 API 后，**AI 调用前**先完成三步预处理：
+
+### 脱敏
+
+| 类型 | 正则匹配 | 替换为 | 示例 |
+|------|---------|--------|------|
+| 手机号 | `1[3-9]\d{9}` | `[PHONE]` | `13800001234` → `[PHONE]` |
+| IP 地址 | `\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}` | `[IP]` | `192.168.1.100` → `[IP]` |
+| 邮箱 | `[\w.-]+@[\w.-]+\.\w+` | `[EMAIL]` | `zhang@co.com` → `[EMAIL]` |
+| 身份证 | `\d{17}[\dXx]` | `[IDCARD]` | `110101199001011234` → `[IDCARD]` |
+| 密码 | `密码[是为：:]\s*(\S+)` | `[MASKED]` | `密码是abc123` → `密码：[MASKED]` |
+
+> 脱敏后文本发给 AI，原始文本不入库，入库时存脱敏版本。
+
+### 意图检测
+
+| 意图 | 说明 | 检测方式 |
+|------|------|---------|
+| `report_issue` | 报障 | 默认意图 |
+| `casual_chat` | 闲聊 | 关键词：你好/谢谢/再见 |
+| `feedback_resolved` | 反馈已解决 | 关键词：解决了/搞定了 |
+| `feedback_unresolved` | 反馈未解决 | 关键词：没解决/还是不行 |
+| `request_human` | 转人工 | 关键词：IT协助/需要工程师 |
+| `query_status` | 查询任务状态 | 关键词：我的任务/进度 |
+
+### 复杂度检测
+
+| 复杂度 | 说明 | 驱动模型 |
+|--------|------|---------|
+| `simple` | 标准桌面问题 | deepseek-chat（快速便宜） |
+| `medium` | 需要工具辅助排查 | deepseek-chat + 工具 |
+| `hard` | 严重故障需人工 | deepseek-reasoner（推理模型） |
+
+---
+
+## AI 处理层
+
+### 模型路由
+
+按复杂度自动选择模型，**简单问题用小模型省钱，复杂问题用大模型保证质量**：
+
+```python
+MODEL_ROUTING = {
+    "simple": {"model": "deepseek-chat", "tools_enabled": False},
+    "medium": {"model": "deepseek-chat", "tools_enabled": True},
+    "hard":   {"model": "deepseek-reasoner", "tools_enabled": True},
+}
+```
+
+### 意图注入
+
+意图检测结果作为 System Prompt 上下文注入 AI：
+
+```
+当前意图：report_issue
+意图说明：用户正在报告一个 IT 运维问题，请提供解决方案或分配工程师。
+```
+
+### 工具调用（单 Agent，不做多节点编排）
+
+| 工具 | 说明 |
+|------|------|
+| `get_current_time` | 获取当前时间 |
+| `search_knowledge` | 检索知识库（skill 文档） |
+| `search_memory` | 检索历史交互记忆 |
+| `assign_engineer` | 分配工程师（负载均衡） |
+| `query_user_tasks` | 查询用户任务状态 |
+
+> AI 自主决定是否调用工具，最多 3 轮工具调用，防止死循环。
+> MCP（Model Context Protocol）作为预留扩展点，未来接入监控/工单/AD 域等外部系统。
+
+---
+
+## 后处理层
+
+AI 回答后，执行四步后处理：
+
+```
+AI 原始回答
+  ↓
+① 二次脱敏（AI 可能引用了敏感信息）
+  ↓
+② 入库（存脱敏版本 + intent/complexity/model_used）
+  ↓
+③ LLM 总结（"打印机离线 -> 重启服务"，不超过50字）
+  ↓
+④ 向量化存储（embedding 存入记忆库，供未来检索）
+```
+
+### 持久化记忆
+
+每次交互都会生成一条记忆，向量化后存入 ChromaDB（独立 collection）：
+
+```
+用户第二次报"VPN连不上"
+  ↓
+search_memory 检索到："VPN连不上 -> 重装客户端 -> 已解决 (T1002)"
+  ↓
+AI 回答："您上次也遇到过 VPN 问题，当时通过重装客户端解决了..."
+```
+
+---
+
+## 钉钉接入
+
+钉钉 Stream 模式作为**纯转发层**，不处理业务逻辑：
+
+```
+钉钉消息 → Stream 收到 → 转发 POST /api/v1/message → 收到响应 → 回复用户
+```
+
+### 接入步骤
+
+1. 在 [钉钉开放平台](https://open.dingtalk.com) 创建企业应用，获取 AppKey 和 AppSecret
+2. 在 `.env` 中填入 `DINGTALK_CLIENT_ID` 和 `DINGTALK_CLIENT_SECRET`
+3. 启动服务 → 工程师给机器人发消息 → UserID 自动绑定到数据库
+
+---
+
+## 定时提醒
+
+任务分配后超时未解决，自动提醒并转派：
+
+```
+任务 assigned → 30分钟未解决 → 第1次提醒
+             → 30分钟 → 第2次提醒
+             → 30分钟 → 第3次提醒
+             → 30分钟（达上限3次）
+               ├─ 有其他工程师 → 自动转派（排除当前）
+               └─ 仅一人 → 继续提醒 + 通知 IT 群
+```
+
+---
+
+## API 接口
+
+### POST /api/v1/message ★ 统一入口（推荐）
+
+**请求：**
+```json
+{
+  "source": "dingtalk",
+  "sender_id": "REMOVED",
+  "sender_name": "小明",
+  "content": "打印机连不上，IP是192.168.1.100"
+}
+```
+
+**响应：**
+```json
+{
+  "intent": "report_issue",
+  "complexity": "simple",
+  "model_used": "deepseek-chat",
+  "response": "请按以下步骤操作：1. 检查电源...\n\n📋 任务编号：T1001",
+  "task_no": "T1001",
+  "memory_saved": true
+}
+```
+
+### POST /task（旧版兼容）
+
+旧版 LangGraph 工作流接口，保留兼容。
+
+### 管理接口
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/health` | GET | 健康检查 |
+| `/tasks` | GET | 查询任务列表 |
+| `/engineers` | GET | 查询工程师名单（含动态负载） |
+| `/memories` | GET | 查询交互记忆 |
+
+---
+
+## 让 AI 理解本项目
+
+```
+这是一个基于 FastAPI + LangChain + MySQL 的运维任务处理系统（v2.0 新架构）。
+
+统一入口：POST /api/v1/message 接管所有消息源（钉钉/API/Web）。
+钉钉 Stream（dingtalk_stream.py）是纯转发层，收到消息转发给 API，零业务代码。
+
+三层处理流程：
+1. 预处理层（preprocess.py）：脱敏（5类正则）→ 意图检测（6种意图）→ 复杂度检测（3档），规则优先+轻量LLM兜底
+2. AI处理层（ai_agent.py）：按复杂度路由模型（simple→deepseek-chat, hard→deepseek-reasoner），
+   意图注入system prompt，单agent+工具调用（agent_tools.py: time/knowledge/memory/assign/query），
+   不做LangGraph多节点编排，AI自主决定调用工具，最多3轮
+3. 后处理层（postprocess.py）：二次脱敏 → 入库（intent/complexity/model_used）→ LLM总结query+answer → 
+   向量化存储到记忆库（memory.py, ChromaDB独立collection）
+
+数据库：MySQL + SQLAlchemy 2.0（database.py + db_manager.py），4张表：engineers/tasks/feedbacks/memories
+知识库：ChromaDB + HuggingFace text2vec-base-chinese（tools.py）
+负载均衡：graph.py 的 assign_engineer()，LLM筛技能+算法选最低负载，作为AI工具被调用
+定时提醒：scheduler.py，APcheduler后台扫描超时任务，3次未响应自动转派
+旧版兼容：POST /task + graph.py LangGraph工作流 + feedback.py 保留
+
+入口是 main.py，启动时自动建库建表+迁移engineers.json+启动定时提醒。
+```
+
+---
+
+## 常见问题
+
+| 问题 | 原因 | 解决 |
+|------|------|------|
+| 启动报 ModuleNotFoundError | 依赖未装 | `pip install -r requirements.txt` |
+| 数据库连接失败 | MySQL 未启动或密码错误 | 检查 MySQL 服务 + `.env` 中 MYSQL 配置 |
+| 数据库表未创建 | 首次启动初始化失败 | 查看启动日志，确认 `init_db()` 执行成功 |
+| 脱敏未生效 | 正则未覆盖 | 检查 `preprocess.py` 中 DESENSITIZE_PATTERNS |
+| 意图检测误判 | 关键词未覆盖 | 检查 `preprocess.py` 关键词列表，或开启 LLM 兜底 |
+| 模型路由不对 | `.env` 配置有误 | 检查 `MODEL_SIMPLE` / `MODEL_MEDIUM` / `MODEL_HARD` |
+| 记忆未存储 | 记忆功能未启用 | 检查 `MEMORY_ENABLED=true` |
+| 钉钉转发超时 | LLM 响应慢 | 调整 `dingtalk_stream.py` 中 timeout（默认 120s） |
+| 定时提醒未触发 | 调度器未启动 | 查看启动日志是否有 `[scheduler] ✅ 定时提醒已启动` |
+| 知识库检索不到 | 向量库未重建 | 删 `chroma_db/` 后重启 |
+| 钉钉私聊通知发不出 | dingtalk_user_id 不正确 | 让工程师给机器人发消息自动绑定 |
+
+---
+
+## 技术栈
+
+| 组件 | 选型 | 原因 |
+|------|------|------|
+| AI 框架 | LangChain tool calling | 单 agent + 工具调用，灵活简洁 |
+| 模型路由 | .env 配置 + config.py | 按复杂度选模型，成本可控 |
+| 向量数据库 | ChromaDB | 知识库 + 记忆库双 collection |
+| 关系型数据库 | MySQL | 任务/工程师/反馈/记忆持久化 |
+| ORM | SQLAlchemy 2.0 | Mapped 风格类型安全 |
+| Embedding | HuggingFace (text2vec-base-chinese) | 免费、离线、中文优化 |
+| LLM | OpenAI 兼容 API | DeepSeek/OpenAI/通义千问随意切换 |
+| Web 框架 | FastAPI | 异步、自带 Swagger 文档 |
+| 定时调度 | APScheduler | 进程内后台调度 |
+| 脱敏 | Python regex | 确定性规则，零 LLM 成本 |
+
+---
+
+## 版本
+
+| 版本 | 日期 | 说明 |
+|------|------|------|
+| **v2.0.0** | 2026-07-10 | 新版架构：统一入口 + 预处理 + 模型路由 + 工具化AI + 记忆 |
+| v1.1.0 | 2026-07-10 | 定时重新提醒：超时提醒 + 自动转派 |
+| v1.0.0 | 2026-07-09 | 第一次大改版：任务持久化 + 反馈闭环 + 负载均衡 |
+| v0.2.0 | 2026-06-15 | 钉钉 Stream 接入 |
+| v0.1.0 | 2026-06 | 初始版本 |
+
+详见 `新版架构方案.md`、`运维Agent框架文档.md` 第十一章「版本控制」和 `CHANGELOG.md`。
+
+---
+
+## License
+
+MIT
