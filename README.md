@@ -324,7 +324,7 @@ MODEL_ROUTING = {
 | `get_current_time` | 获取当前时间 |
 | `search_knowledge` | 检索知识库（skill 文档） |
 | `search_memory` | 检索历史交互记忆 |
-| `assign_engineer` | 分配工程师（负载均衡） |
+| `assign_engineer(candidates, title, desc)` | 分配工程师（AI 传候选人，纯算法选人） |
 | `query_user_tasks` | 查询用户任务状态 |
 
 > AI 自主决定是否调用工具，最多 3 轮工具调用，防止死循环。
@@ -501,7 +501,8 @@ Agent层（ai_agent.py）：按复杂度路由模型，意图注入，单agent+5
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| **v2.2.0** | 2026-07-10 | 数据库统一：PostgreSQL + pgvector（废弃 ChromaDB） |
+| **v2.3.0** | 2026-07-10 | 负载均衡改为 Skill+Tool 模式（去掉工具内 LLM） |
+| v2.2.0 | 2026-07-10 | 数据库统一：PostgreSQL + pgvector（废弃 ChromaDB） |
 | v2.1.0 | 2026-07-10 | 混合路由：确定性流程+Agent，简单问题一步到位 |
 | v2.0.0 | 2026-07-10 | 新版架构：统一入口 + 预处理 + 模型路由 + 工具化AI + 记忆 |
 | v1.1.0 | 2026-07-10 | 定时重新提醒：超时提醒 + 自动转派 |

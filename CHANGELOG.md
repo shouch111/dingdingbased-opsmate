@@ -1,5 +1,20 @@
 # 更新日志
 
+## [v2.3.0] - 2026-07-10
+
+### 🔄 重构 - 负载均衡改为 Skill + Tool 模式
+- 新增 `engineers-info.md`：工程师团队信息 Skill 文档（技能/分配建议/负载规则）
+- `graph.py` 新增 `assign_engineer_by_algorithm()`：纯算法选人（0 次 LLM）
+- `agent_tools.py` 改造 `assign_engineer` 工具：参数改为 `candidates`（AI 传入候选人），调用纯算法函数
+- LLM 调用从 2-3 次降为 1 次（AI 通过 Skill 获取工程师信息，工具只做算法选人）
+
+### 💡 设计变化
+- 改造前：工具内部藏 LLM 调用（LLM 筛技能 + 算法选人 + AI 总结 = 3 次 LLM）
+- 改造后：AI 通过 Skill 知道工程师信息 -> AI 自己选候选人 -> 工具纯算法选人 -> AI 总结 = 1 次 LLM
+- 原版 `assign_engineer(task, exclude_name)` 保留，feedback.py / scheduler.py 不受影响
+
+---
+
 ## [v2.2.0] - 2026-07-10
 
 ### 🔄 重构 - 数据库统一为 PostgreSQL + pgvector

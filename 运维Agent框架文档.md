@@ -258,7 +258,7 @@ AI 调用前完成，全部用确定性规则 + 轻量 LLM 兜底：
 | `get_current_time` | 获取当前时间 |
 | `search_knowledge(query)` | 检索知识库（pgvector 向量检索） |
 | `search_memory(query)` | 检索历史交互记忆（pgvector 向量检索） |
-| `assign_engineer(title, desc)` | 分配工程师（调用 graph.py 负载均衡算法） |
+| `assign_engineer(candidates, title, desc)` | 分配工程师（AI 通过 Skill 获取信息并传候选人，纯算法选人，0次LLM） |
 | `query_user_tasks(sender_id)` | 查询用户任务状态 |
 
 > MCP（Model Context Protocol）作为预留扩展点，未来接入监控/工单/AD 域等外部系统。
@@ -533,6 +533,15 @@ curl http://localhost:8000/memories
 
 ### 版本历史
 
+#### 🏷️ v2.3.0 -- 负载均衡改为 Skill + Tool 模式（2026-07-10）
+
+> 去掉工具内 LLM 调用，AI 通过 Skill 获取工程师信息，工具只做纯算法选人
+
+- 新增 `engineers-info.md`：工程师团队信息 Skill 文档
+- `graph.py` 新增 `assign_engineer_by_algorithm()`：纯算法选人
+- `agent_tools.py` 改造 `assign_engineer` 工具：参数改为 `candidates`
+- LLM 调用从 2-3 次降为 1 次
+
 #### 🏷️ v2.2.0 -- 数据库统一为 PostgreSQL + pgvector（2026-07-10）
 
 > 废弃 ChromaDB，两套数据库合并为一套 PostgreSQL
@@ -593,6 +602,6 @@ curl http://localhost:8000/memories
 ---
 
 > 📅 创建日期：2025-01
-> 📅 最近更新：2026-07-10（v2.2.0 PostgreSQL + pgvector）
+> 📅 最近更新：2026-07-10（v2.3.0 Skill+Tool 重构）
 > 👤 适用对象：IT 运维团队，1-2 人维护
-> 🎯 当前状态：混合路由 + 统一数据库 + 预处理 + 模型路由 + 工具化AI + 持久化记忆
+> 🎯 当前状态：混合路由 + 统一数据库 + Skill+Tool 扩展 + 持久化记忆
