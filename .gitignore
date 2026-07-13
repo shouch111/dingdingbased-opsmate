@@ -1,4 +1,4 @@
-# 环境变量 -- 包含 API Key / MySQL 密码，绝对不能提交
+# 环境变量 -- 包含 API Key / 数据库密码，绝对不能提交
 .env
 engineers.json
 
@@ -11,8 +11,9 @@ __pycache__/
 dist/
 build/
 
-# ChromaDB 向量库持久化文件（运行时自动生成）
+# 旧版 ChromaDB 残留（v2.2 已废弃，保留忽略以防误提交）
 data/chroma_db/
+data/memory_db/
 
 # 测试输出文件
 test_output.txt

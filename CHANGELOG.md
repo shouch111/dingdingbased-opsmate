@@ -1,5 +1,36 @@
 # 更新日志
 
+## [v2.2.0] - 2026-07-10
+
+### 🔄 重构 - 数据库统一为 PostgreSQL + pgvector
+- **废弃 ChromaDB**，将两套数据库（MySQL + ChromaDB）合并为单一 PostgreSQL
+- 关系型数据 + 向量数据统一存储：engineers/tasks/feedbacks/memories/knowledge_docs
+- pgvector 扩展提供原生向量检索（cosine_distance），一条 SQL 完成语义检索
+- 新增 `KnowledgeDoc` 表：知识库分块 + 向量，替代原 ChromaDB chroma_db/
+- `Memory` 表新增 `embedding` 列，替代原 ChromaDB memory_db/
+- 新增 `embedding.py`：共享 Embedding 服务（单例模型，避免重复加载）
+- 记忆存储从双写（ChromaDB + MySQL）简化为一次入库（含向量）
+
+### 🔧 优化
+- `database.py`：MySQL->PostgreSQL 驱动，init_db 自动安装 pgvector 扩展
+- `db_manager.py`：新增知识库 CRUD + 向量检索函数
+- `tools.py`：知识库检索改用 pgvector，废弃 ChromaDB 依赖
+- `memory.py`：记忆检索改用 pgvector，废弃 ChromaDB 依赖
+- `postprocess.py`：简化记忆存储逻辑
+- `config.py`：移除 MEMORY_DB_PATH
+- `requirements.txt`：pymysql->psycopg2-binary，新增 pgvector，移除 chromadb
+
+### 📦 依赖变更
+- 移除：pymysql, langchain-chroma, chromadb
+- 新增：psycopg2-binary, pgvector
+
+### 💡 收益
+- 数据库从 2 个减为 1 个，部署和运维简化
+- 向量检索从独立进程变为数据库原生，消除数据一致性风险
+- 记忆存储从两次写入简化为一次入库
+
+---
+
 ## [v2.1.0] - 2026-07-10
 
 ### 🆕 新增 - 混合路由架构
