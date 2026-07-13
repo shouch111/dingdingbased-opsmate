@@ -68,7 +68,6 @@ INTENT_LLM_FALLBACK = os.getenv("INTENT_LLM_FALLBACK", "true").lower() == "true"
 # -------------------- 记忆配置 --------------------
 
 MEMORY_ENABLED = os.getenv("MEMORY_ENABLED", "true").lower() == "true"
-MEMORY_DB_PATH = os.getenv("MEMORY_DB_PATH", str(DATA_DIR / "memory_db"))
 MEMORY_SEARCH_TOP_K = int(os.getenv("MEMORY_SEARCH_TOP_K", "3"))
 
 # -------------------- 工具调用限制 --------------------

@@ -489,7 +489,7 @@ def create_reminder(task_id: int, engineer_name: str) -> dict:
     return create_feedback(task_id, "unresolved", _reminder_key(engineer_name))
 
 
-# ==================== 记忆相关（新架构新增） ====================
+# ==================== 记忆相关（PostgreSQL + pgvector） ====================
 
 
 def create_memory(
@@ -498,9 +498,9 @@ def create_memory(
     intent: str = "",
     complexity: str = "",
     model_used: str = "",
-    embedding_id: str = "",
+    embedding: list | None = None,
 ) -> dict:
-    """存储一条交互记忆"""
+    """存储一条交互记忆（含向量）"""
     from .database import Memory
 
     session = _get_session()
@@ -511,14 +511,13 @@ def create_memory(
             intent=intent,
             complexity=complexity,
             model_used=model_used,
-            embedding_id=embedding_id,
+            embedding=embedding,
         )
         _commit_and_refresh(session, mem)
         return {
             "id": mem.id,
             "task_id": mem.task_id,
             "summary": mem.summary,
-            "embedding_id": mem.embedding_id,
         }
     finally:
         session.close()
@@ -546,5 +545,122 @@ def list_memories(limit: int = 20) -> list[dict]:
             }
             for m in mems
         ]
+    finally:
+        session.close()
+
+
+def search_memories_by_vector(query_embedding: list, top_k: int = 3) -> list[dict]:
+    """向量检索记忆（pgvector cosine distance）"""
+    from .database import Memory
+
+    if not query_embedding:
+        return []
+    session = _get_session()
+    try:
+        mems = (
+            session.query(Memory)
+            .filter(Memory.embedding.isnot(None))
+            .order_by(Memory.embedding.cosine_distance(query_embedding))
+            .limit(top_k)
+            .all()
+        )
+        return [
+            {
+                "id": m.id,
+                "task_id": m.task_id,
+                "summary": m.summary,
+            }
+            for m in mems
+        ]
+    finally:
+        session.close()
+
+
+# ==================== 知识库相关（PostgreSQL + pgvector） ====================
+
+
+def add_knowledge_chunk(
+    source: str, chunk_index: int, content: str, embedding: list, file_hash: str
+) -> dict:
+    """存储一个知识库分块"""
+    from .database import KnowledgeDoc
+
+    session = _get_session()
+    try:
+        doc = KnowledgeDoc(
+            source=source,
+            chunk_index=chunk_index,
+            content=content,
+            embedding=embedding,
+            file_hash=file_hash,
+        )
+        _commit_and_refresh(session, doc)
+        return {"id": doc.id, "source": doc.source}
+    finally:
+        session.close()
+
+
+def delete_knowledge_by_source(source: str):
+    """删除指定来源文件的所有分块"""
+    from .database import KnowledgeDoc
+
+    session = _get_session()
+    try:
+        session.query(KnowledgeDoc).filter(KnowledgeDoc.source == source).delete()
+        session.commit()
+    finally:
+        session.close()
+
+
+def get_knowledge_file_hashes() -> dict[str, str]:
+    """获取知识库中所有文件的哈希（用于增量同步）"""
+    from .database import KnowledgeDoc
+
+    session = _get_session()
+    try:
+        rows = (
+            session.query(KnowledgeDoc.source, KnowledgeDoc.file_hash)
+            .distinct(KnowledgeDoc.source)
+            .all()
+        )
+        return {row[0]: row[1] for row in rows}
+    finally:
+        session.close()
+
+
+def search_knowledge_by_vector(query_embedding: list, top_k: int = 3) -> list[dict]:
+    """向量检索知识库（pgvector cosine distance）"""
+    from .database import KnowledgeDoc
+
+    if not query_embedding:
+        return []
+    session = _get_session()
+    try:
+        docs = (
+            session.query(KnowledgeDoc)
+            .filter(KnowledgeDoc.embedding.isnot(None))
+            .order_by(KnowledgeDoc.embedding.cosine_distance(query_embedding))
+            .limit(top_k)
+            .all()
+        )
+        return [
+            {
+                "id": d.id,
+                "source": d.source,
+                "content": d.content,
+            }
+            for d in docs
+        ]
+    finally:
+        session.close()
+
+
+def count_knowledge_chunks() -> int:
+    """知识库分块总数"""
+    from .database import KnowledgeDoc
+
+    session = _get_session()
+    try:
+        return session.query(KnowledgeDoc).count()
     finally:
         session.close()

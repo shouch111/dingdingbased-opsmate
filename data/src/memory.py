@@ -1,87 +1,47 @@
 """
-记忆管理 -- 交互记忆的向量存储与检索。
+记忆管理 -- 交互记忆的向量存储与检索（PostgreSQL + pgvector）。
 
-与知识库（skill 文档）隔离，使用 ChromaDB 独立 collection。
+与知识库共用一个 PostgreSQL 数据库，memories 表含 embedding 列。
 每次交互后由后处理层调用 save_memory 存储，AI 处理层调用 search_memory 检索。
 """
 
-import os
-import uuid
-from pathlib import Path
-
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ.setdefault("HF_HUB_OFFLINE", "0")
-
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
-
-from .config import MEMORY_DB_PATH, MEMORY_ENABLED, MEMORY_SEARCH_TOP_K
-
-# -------------------- Embedding 模型（与知识库共用） --------------------
-
-_embeddings = None
-_vectorstore = None
-
-
-def _get_embeddings():
-    """获取 embedding 模型实例（单例）"""
-    global _embeddings
-    if _embeddings is None:
-        _embeddings = HuggingFaceEmbeddings(
-            model_name="shibing624/text2vec-base-chinese",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True},
-        )
-    return _embeddings
-
-
-def _get_vectorstore():
-    """获取记忆向量库实例（单例）"""
-    global _vectorstore
-    if _vectorstore is None:
-        Path(MEMORY_DB_PATH).mkdir(parents=True, exist_ok=True)
-        _vectorstore = Chroma(
-            collection_name="ops_memory",
-            embedding_function=_get_embeddings(),
-            persist_directory=MEMORY_DB_PATH,
-        )
-    return _vectorstore
-
-
-# -------------------- 记忆存储与检索 --------------------
+from . import db_manager
+from .config import MEMORY_ENABLED, MEMORY_SEARCH_TOP_K
 
 
 def save_memory(
     summary: str, task_id: int | None = None, metadata: dict | None = None
-) -> str:
+) -> bool:
     """
-    存储一条交互记忆到向量库。
-    返回向量库中的 doc_id（供 DB 记录 embedding_id）。
+    存储一条交互记忆（计算向量 + 存入 memories 表）。
+    返回是否存储成功。
     """
     if not MEMORY_ENABLED:
-        return ""
+        return False
 
     if not summary or not summary.strip():
-        return ""
+        return False
 
     try:
-        vs = _get_vectorstore()
-        doc_id = f"memory_{uuid.uuid4().hex[:12]}"
+        from .embedding import compute_embedding
 
-        meta = {"task_id": str(task_id) if task_id else ""}
-        if metadata:
-            meta.update(metadata)
+        embedding = compute_embedding(summary)
 
-        vs.add_texts(
-            texts=[summary],
-            metadatas=[meta],
-            ids=[doc_id],
+        intent = metadata.get("intent", "") if metadata else ""
+        complexity = metadata.get("complexity", "") if metadata else ""
+
+        db_manager.create_memory(
+            task_id=task_id,
+            summary=summary,
+            intent=intent,
+            complexity=complexity,
+            embedding=embedding,
         )
-        print(f"[memory] ✅ 记忆已存储：{summary[:50]}... (id={doc_id})")
-        return doc_id
+        print(f"[memory] ✅ 记忆已存储：{summary[:50]}...")
+        return True
     except Exception as e:
         print(f"[memory] ❌ 存储失败：{e}")
-        return ""
+        return False
 
 
 def search_memory(query: str, top_k: int | None = None) -> str:
@@ -96,19 +56,21 @@ def search_memory(query: str, top_k: int | None = None) -> str:
         return ""
 
     try:
-        vs = _get_vectorstore()
-        k = top_k or MEMORY_SEARCH_TOP_K
-        docs = vs.similarity_search(query, k=k)
+        from .embedding import compute_embedding
 
-        if not docs:
+        query_embedding = compute_embedding(query)
+        if not query_embedding:
             return ""
 
-        results = []
-        for doc in docs:
-            results.append(f"- {doc.page_content}")
+        k = top_k or MEMORY_SEARCH_TOP_K
+        mems = db_manager.search_memories_by_vector(query_embedding, top_k=k)
 
+        if not mems:
+            return ""
+
+        results = [f"- {m['summary']}" for m in mems]
         memory_text = "\n".join(results)
-        print(f"[memory] 🔍 检索到 {len(docs)} 条相关记忆")
+        print(f"[memory] 🔍 检索到 {len(mems)} 条相关记忆")
         return memory_text
     except Exception as e:
         print(f"[memory] ❌ 检索失败：{e}")
@@ -120,7 +82,13 @@ def get_memory_count() -> int:
     if not MEMORY_ENABLED:
         return 0
     try:
-        vs = _get_vectorstore()
-        return vs._collection.count()
+        from . import db_manager as _dbm
+        from .database import Memory
+
+        session = _dbm._get_session()
+        try:
+            return session.query(Memory).count()
+        finally:
+            session.close()
     except Exception:
         return 0

@@ -171,28 +171,14 @@ def _summarize_and_vectorize(
 
     print(f"[postprocess] 📝 摘要：{summary[:60]}...")
 
-    # 2. 向量化存储
+    # 2. 向量化存储（PostgreSQL memories 表，含 embedding）
     from . import memory as memory_module
 
-    embedding_id = memory_module.save_memory(
+    return memory_module.save_memory(
         summary=summary,
         task_id=task_id,
         metadata={"intent": intent, "complexity": complexity},
     )
-
-    # 3. 记录到 DB
-    if embedding_id:
-        db_manager.create_memory(
-            task_id=task_id,
-            summary=summary,
-            intent=intent,
-            complexity=complexity,
-            model_used=model_used,
-            embedding_id=embedding_id,
-        )
-        return True
-
-    return False
 
 
 def _generate_summary(query: str, answer: str) -> str:
