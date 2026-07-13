@@ -384,6 +384,47 @@ def assign_engineer(task: Task, exclude_name: str = "") -> tuple[str, str]:
     return chosen["name"], full_reason
 
 
+def assign_engineer_by_algorithm(candidate_names: list[str]) -> tuple[str, str]:
+    """
+    纯算法负载均衡（不调用 LLM）。
+    从 AI 提供的候选人中选负载最低的在岗工程师。
+    供 agent_tools.py 的 assign_engineer 工具调用。
+    """
+    import random
+
+    engineers = load_engineers()
+    if not engineers:
+        return "", "无可用工程师"
+
+    # 从全量工程师中筛选 AI 指定的候选人
+    matched = [e for e in engineers if e["name"] in candidate_names]
+
+    if not matched:
+        return "", "候选人不在工程师名单中"
+
+    # 优先在岗，全部不在岗则用不在岗的（方案 B）
+    available_pool = [e for e in matched if e.get("available", True)]
+    pool = available_pool if available_pool else matched
+
+    # 动态计算负载
+    for e in pool:
+        e["current_load"] = count_active_tasks(e["name"])
+
+    # 选最低负载
+    min_load = min(e["current_load"] for e in pool)
+    finalists = [e for e in pool if e["current_load"] == min_load]
+
+    # 优先 0 负载，同负载随机
+    zero_load = [e for e in finalists if e["current_load"] == 0]
+    chosen = random.choice(zero_load if zero_load else finalists)
+
+    load_reason = f"当前任务数最少（{chosen['current_load']}个）"
+    if not chosen.get("available", True):
+        load_reason += "（注意：该工程师当前不在岗，可能响应较慢）"
+
+    return chosen["name"], load_reason
+
+
 def assign_node(state: AgentState) -> dict:
     """
     对于困难任务：用负载均衡算法分配工程师，存库，发送通知。
