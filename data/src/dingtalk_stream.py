@@ -6,9 +6,7 @@
 所有业务逻辑（预处理/AI/后处理）集中在 API 层。
 """
 
-import json
 import os
-from pathlib import Path
 
 import requests
 from dingtalk_stream import (
@@ -23,43 +21,30 @@ load_dotenv()
 
 CLIENT_ID = os.getenv("DINGTALK_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("DINGTALK_CLIENT_SECRET", "")
-ENGINEERS_PATH = Path(__file__).parent.parent / "engineers.json"
 
 # API 转发地址（本地 FastAPI）
 API_MESSAGE_URL = "http://localhost:8000/api/v1/message"
 
 
-def _auto_fill_engineer_id(sender_nick: str, sender_id: str):
-    """自动回填工程师的钉钉 UserID（优先写 DB，JSON 降级）。"""
-    if not sender_id or not sender_nick:
+def _auto_bind_engineer(sender_nick: str, sender_staff_id: str, sender_user_id: str):
+    """
+    自动匹配并回填工程师身份（工号 + 钉钉 userId）。
+    匹配决策委托给 engineer_matcher，本函数只负责调用与日志，不承载业务规则。
+    """
+    if not sender_nick:
         return
-
     try:
-        from . import db_manager
+        from . import engineer_matcher
 
-        if db_manager.save_engineer_dingtalk_id(sender_nick, sender_id):
-            print(f"[钉钉] 🔗 自动绑定：{sender_nick} -> dingtalk_user_id={sender_id}")
-            return
-        return
+        result = engineer_matcher.match_and_bind(
+            sender_nick=sender_nick,
+            sender_staff_id=sender_staff_id,
+            sender_user_id=sender_user_id,
+        )
+        if not result.matched:
+            print(f"[钉钉] ⚠️ 工程师身份未绑定：{sender_nick}（{result.reason}）")
     except Exception as e:
-        print(f"[钉钉] ⚠️ DB 绑定失败，降级写 JSON：{e}")
-
-    if not ENGINEERS_PATH.exists():
-        return
-    try:
-        with open(ENGINEERS_PATH, "r", encoding="utf-8") as f:
-            engineers = json.load(f)
-        updated = False
-        for e in engineers:
-            if e.get("name") == sender_nick and not e.get("dingtalk_user_id"):
-                e["dingtalk_user_id"] = sender_id
-                updated = True
-                print(f"[钉钉] 🔗 自动绑定(JSON)：{sender_nick} -> {sender_id}")
-        if updated:
-            with open(ENGINEERS_PATH, "w", encoding="utf-8") as f:
-                json.dump(engineers, f, ensure_ascii=False, indent=2)
-    except Exception as ex:
-        print(f"[钉钉] ❌ JSON 绑定也失败：{ex}")
+        print(f"[钉钉] ⚠️ 工程师身份匹配失败：{e}")
 
 
 class OpsAgentChatbot(AsyncChatbotHandler):
@@ -75,11 +60,13 @@ class OpsAgentChatbot(AsyncChatbotHandler):
         sender_nick = incoming_message.sender_nick or "用户"
         print(f"[钉钉] 收到消息：{sender_nick}")
 
-        # 自动回填工程师的钉钉 UserID
+        # 自动匹配并回填工程师身份（工号 / 钉钉 userId）
         sender_id = getattr(incoming_message, "sender_id", "")
         sender_staff_id = getattr(incoming_message, "sender_staff_id", "")
+        _auto_bind_engineer(sender_nick, sender_staff_id, sender_id)
+
+        # 业务通道用的稳定用户标识（工号优先，回退 userId；与原行为一致）
         bind_id = sender_staff_id or sender_id
-        _auto_fill_engineer_id(sender_nick, bind_id)
 
         # 提取文本
         text_list = incoming_message.get_text_list()

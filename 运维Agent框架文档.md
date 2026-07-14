@@ -185,7 +185,7 @@ flowchart TD
 
 | 表名 | 说明 | 向量列 |
 |------|------|--------|
-| `engineers` | IT 工程师（name/skills/mobile/dingtalk_user_id/available） | 无 |
+| `engineers` | IT 工程师（name/staff_id/skills/mobile/dingtalk_user_id/available） | 无 |
 | `tasks` | 运维任务（含 intent/complexity/model_used/raw_content） | 无 |
 | `feedbacks` | 任务反馈记录 | 无 |
 | `memories` | 交互记忆（summary + embedding） | `embedding Vector(768)` |
@@ -200,7 +200,7 @@ flowchart TD
 
 | 函数分类 | 函数 | 说明 |
 |---------|------|------|
-| 工程师 | `load_engineers_from_db()` / `save_engineer_dingtalk_id()` | 替代旧 JSON 读写 |
+| 工程师 | `load_engineers_from_db()` / `get_engineer_by_staff_id()` / `get_engineer_by_mobile()` / `get_engineers_by_name()` / `update_engineer_binding()` | 工程师查询 + 身份绑定回填（按工号） |
 | 任务 | `create_task()` / `get_user_active_task()` / `update_task_status()` | 含 intent/complexity/model_used |
 | 反馈 | `create_feedback()` / `count_reminders()` | 提醒记录复用 feedbacks 表 |
 | 记忆 | `create_memory(embedding)` / `search_memories_by_vector()` | pgvector cosine_distance |
@@ -296,12 +296,23 @@ AI 调用前完成，全部用确定性规则 + 轻量 LLM 兜底：
 | 内容 | 说明 |
 |------|------|
 | `OpsAgentChatbot.process()` | 收到消息 -> 转发 `POST /api/v1/message` -> 回复用户 |
-| `_auto_fill_engineer_id()` | 工程师首次发消息自动绑定钉钉 ID（写 DB） |
+| `_auto_bind_engineer()` | 委托 `engineer_matcher` 按工号绑定工程师身份（工号直连/首次登记） |
 | `start_stream_bot()` | 启动 WebSocket 长连接 |
 
-> 零业务代码，所有逻辑集中在 API 层。
+> 零业务代码，所有逻辑集中在 API 层。工程师身份匹配委托给独立的 `engineer_matcher.py`（见 4.14）。
 
-### 4.14 `scheduler.py` -- 定时提醒调度器
+### 4.14 `engineer_matcher.py` -- 工程师身份匹配层（按工号绑定）
+
+| 函数 | 说明 |
+|------|------|
+| `match_and_bind(sender_nick, sender_staff_id, sender_user_id)` | 按工号绑定工程师身份，返回 `MatchResult` |
+| `_locate_unbound_engineer()` | 首次绑定：在未登记工号的工程师中用姓名/手机号唯一定位 |
+| `_bind_user_id()` / `_bind_staff_and_user()` | 工号直连绑定 / 首次登记工号+绑定 |
+
+> 独立模块，不依赖钉钉 SDK（只接收字符串参数）；`dingtalk_user_id` 仅在工号确立后写入。
+> 工号取自钉钉消息回调的 `sender_staff_id`，无需对接通讯录 API；名单无需预填工号，首次发消息自动回填。
+
+### 4.15 `scheduler.py` -- 定时提醒调度器
 
 | 函数 | 说明 |
 |------|------|

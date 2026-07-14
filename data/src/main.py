@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from . import db_manager
-from .database import create_database_if_not_exists, init_db
+from .database import create_database_if_not_exists, init_db, migrate_engineers_schema
 from .models import AgentState, MessageRequest, MessageResponse, Task
 
 api = FastAPI(title="运维任务分配 Agent")
@@ -43,8 +43,25 @@ class TaskResponse(BaseModel):
 # ==================== 启动初始化 + 数据迁移 ====================
 
 
+def _clean_engineer_name(raw_name: str, mobile: str) -> tuple[str, str]:
+    """
+    清洗工程师姓名：剥离姓名中混入的手机号。
+    返回 (清洗后姓名, 手机号)。若姓名含手机号且 mobile 为空，用剥离出的手机号回填。
+    """
+    import re
+
+    mobile_re = re.compile(r"1[3-9]\d{9}")
+    m = mobile_re.search(raw_name or "")
+    if m:
+        clean_name = mobile_re.sub("", raw_name).strip()
+        extracted_mobile = m.group(0)
+        final_mobile = mobile or extracted_mobile
+        return clean_name, final_mobile
+    return (raw_name or "").strip(), mobile or ""
+
+
 def migrate_engineers_json_to_db():
-    """首次启动：将 engineers.json 导入数据库。"""
+    """首次启动：将 engineers.json 导入数据库（含姓名手机号清洗）。"""
     json_path = Path(__file__).parent.parent / "engineers.json"
 
     if db_manager.count_engineers() > 0:
@@ -59,6 +76,12 @@ def migrate_engineers_json_to_db():
         with open(json_path, "r", encoding="utf-8") as f:
             engineers = json.load(f)
         for e in engineers:
+            # 清洗：剥离姓名里混入的手机号，避免污染唯一匹配
+            clean_name, clean_mobile = _clean_engineer_name(
+                e.get("name", ""), e.get("mobile", "")
+            )
+            e["name"] = clean_name
+            e["mobile"] = clean_mobile
             db_manager.create_engineer(e)
         print(f"[迁移] 已导入 {len(engineers)} 位工程师到数据库")
     except Exception as e:
@@ -71,6 +94,7 @@ def on_startup():
     try:
         create_database_if_not_exists()
         init_db()
+        migrate_engineers_schema()
         migrate_engineers_json_to_db()
     except Exception as e:
         print(f"[startup] ⚠️ 数据库初始化失败，将以降级模式运行：{e}")

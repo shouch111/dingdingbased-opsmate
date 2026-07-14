@@ -51,6 +51,7 @@ def create_engineer(data: dict) -> dict:
     try:
         engineer = Engineer(
             name=data["name"],
+            staff_id=data.get("staff_id") or None,  # 空串转 None，避免唯一约束冲突
             skills=data.get("skills", []),
             mobile=data.get("mobile", ""),
             dingtalk_user_id=data.get("dingtalk_user_id", ""),
@@ -84,22 +85,66 @@ def get_engineer_by_name(name: str) -> Optional[dict]:
         session.close()
 
 
-def save_engineer_dingtalk_id(name: str, dingtalk_user_id: str) -> bool:
+def get_engineer_by_staff_id(staff_id: str) -> Optional[dict]:
+    """按工号查工程师（唯一识别，用于身份直连）"""
+    if not staff_id:
+        return None
+    session = _get_session()
+    try:
+        e = session.query(Engineer).filter(Engineer.staff_id == staff_id).first()
+        return _engineer_to_dict(e) if e else None
+    finally:
+        session.close()
+
+
+def get_engineer_by_mobile(mobile: str) -> Optional[dict]:
+    """按手机号查工程师（用于身份辅助匹配）"""
+    if not mobile:
+        return None
+    session = _get_session()
+    try:
+        e = session.query(Engineer).filter(Engineer.mobile == mobile).first()
+        return _engineer_to_dict(e) if e else None
+    finally:
+        session.close()
+
+
+def get_engineers_by_name(name: str) -> list[dict]:
+    """按姓名查工程师（可能多条，用于同名场景的候选集）"""
+    if not name:
+        return []
+    session = _get_session()
+    try:
+        rows = session.query(Engineer).filter(Engineer.name == name).all()
+        return [_engineer_to_dict(e) for e in rows]
+    finally:
+        session.close()
+
+
+def update_engineer_binding(
+    engineer_id: int,
+    staff_id: Optional[str] = None,
+    dingtalk_user_id: Optional[str] = None,
+) -> bool:
     """
-    更新工程师的钉钉 UserID（替代原 _auto_fill_engineer_id 写 JSON 的逻辑）。
-    返回是否更新成功。
+    回填工程师的工号 / 钉钉 UserId（仅当原值为空时回填，不覆盖已有值）。
+    返回是否发生了更新。
     """
     session = _get_session()
     try:
-        e = session.query(Engineer).filter(Engineer.name == name).first()
+        e = session.query(Engineer).filter(Engineer.id == engineer_id).first()
         if not e:
             return False
-        if e.dingtalk_user_id:  # 已有值则不覆盖
-            return False
-        e.dingtalk_user_id = dingtalk_user_id
-        session.commit()
-        print(f"[db_manager] 🔗 已绑定 {name} → dingtalk_user_id={dingtalk_user_id}")
-        return True
+        updated = False
+        if staff_id and not e.staff_id:
+            e.staff_id = staff_id
+            updated = True
+        if dingtalk_user_id and not e.dingtalk_user_id:
+            e.dingtalk_user_id = dingtalk_user_id
+            updated = True
+        if updated:
+            session.commit()
+        return updated
     finally:
         session.close()
 
@@ -121,7 +166,9 @@ def update_engineer_availability(name: str, available: bool) -> bool:
 def _engineer_to_dict(e: Engineer) -> dict:
     """ORM 对象转字典（与原 engineers.json 格式一致）"""
     return {
+        "id": e.id,
         "name": e.name,
+        "staff_id": e.staff_id or "",
         "skills": e.skills if e.skills else [],
         "mobile": e.mobile or "",
         "dingtalk_user_id": e.dingtalk_user_id or "",

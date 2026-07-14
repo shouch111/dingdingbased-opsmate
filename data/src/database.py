@@ -77,12 +77,18 @@ class Engineer(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(
-        String(100), nullable=False, unique=True, comment="姓名"
+        String(100), nullable=False, comment="姓名（允许同名，靠 staff_id 唯一识别）"
+    )
+    staff_id: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        unique=True,
+        comment="员工工号（钉钉 staffId，唯一识别）",
     )
     skills: Mapped[list] = mapped_column(JSON, nullable=False, comment="技能标签列表")
     mobile: Mapped[str] = mapped_column(String(20), default="", comment="手机号")
     dingtalk_user_id: Mapped[str] = mapped_column(
-        String(64), default="", comment="钉钉 UserID"
+        String(64), default="", comment="钉钉 UserId（用于发私聊消息）"
     )
     available: Mapped[bool] = mapped_column(Boolean, default=True, comment="是否在岗")
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
@@ -234,6 +240,50 @@ def init_db():
     # 建表
     Base.metadata.create_all(engine)
     print("[database] ✅ 数据库表已就绪（含 pgvector）")
+
+
+def migrate_engineers_schema():
+    """
+    engineers 表结构增量迁移（幂等，安全可重复执行）：
+    - 新增 staff_id 列（工号）
+    - 移除 name 的 unique 约束（允许同名）
+    - 为 staff_id 建立唯一约束（PostgreSQL 允许多个 NULL，未绑定的工程师不冲突）
+
+    适用于已存在的旧表平滑升级；全新表由 create_all 直接建好，本函数跳过实际改动。
+    """
+    with engine.connect() as conn:
+        # 1. 新增 staff_id 列
+        conn.execute(
+            text("ALTER TABLE engineers ADD COLUMN IF NOT EXISTS staff_id VARCHAR(64)")
+        )
+        # 2. 移除 name 上的 unique 约束（自动查找约束名，兼容不同命名）
+        conn.execute(
+            text(
+                "DO $$ "
+                "DECLARE c text; "
+                "BEGIN "
+                "  SELECT conname INTO c FROM pg_constraint "
+                "  WHERE conrelid='engineers'::regclass AND contype='u' "
+                "    AND pg_get_constraintdef(oid) LIKE '%name%'; "
+                "  IF c IS NOT NULL THEN "
+                "    EXECUTE format('ALTER TABLE engineers DROP CONSTRAINT %I', c); "
+                "  END IF; "
+                "END $$;"
+            )
+        )
+        # 3. staff_id 唯一约束（若不存在则创建；多个 NULL 不冲突）
+        conn.execute(
+            text(
+                "DO $$ "
+                "BEGIN "
+                "  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='ux_engineers_staff_id') THEN "
+                "    ALTER TABLE engineers ADD CONSTRAINT ux_engineers_staff_id UNIQUE (staff_id); "
+                "  END IF; "
+                "END $$;"
+            )
+        )
+        conn.commit()
+        print("[database] ✅ engineers 表结构迁移完成（staff_id + name 去 unique）")
 
 
 def get_db():

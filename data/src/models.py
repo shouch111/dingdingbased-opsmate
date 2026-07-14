@@ -44,7 +44,8 @@ class Task(BaseModel):
 
 
 class Engineer(BaseModel):
-    name: str  # 必填
+    name: str  # 必填（允许同名）
+    staff_id: str = ""  # 员工工号（钉钉 staffId，唯一识别）
     skills: list[str] = Field(default_factory=list)
     mobile: str = ""  # 手机号，用于钉钉群 @ 提及
     dingtalk_user_id: str = ""  # 钉钉 UserId，用于私聊消息推送
