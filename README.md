@@ -9,56 +9,41 @@
 ## 架构概览
 
 ```mermaid
-flowchart TD
-    DT[📱 钉钉消息] --> STREAM[钉钉 Stream\n纯转发]
-    API_USER[👤 API/用户消息] --> MSG
-    STREAM --> MSG["POST /api/v1/message\n统一入口"]
+flowchart LR
+    DT[📱 钉钉] --> STREAM[Stream 纯转发]
+    API_USER[👤 API] --> MSG
+    STREAM --> MSG["POST /api/v1/message"]
 
     MSG --> PRE
-
-    subgraph PREPROCESS[预处理层 preprocess.py]
-        PRE["① 预处理"]
-        PRE --> MASK["脱敏\n手机/IP/邮箱/身份证/密码"]
-        MASK --> INTENT["意图检测\n报障/闲聊/反馈/转人工/查询"]
-        INTENT --> CPLX["复杂度检测\nsimple/medium/hard"]
+    subgraph PRE[预处理 preprocess.py]
+        direction LR
+        P1[脱敏] --> P2[意图检测] --> P3[复杂度检测]
     end
 
-    CPLX --> ROUTER
+    PRE --> ROUTER{"路由分流"}
 
-    subgraph ROUTERLAYER[混合路由 router.py]
-        ROUTER{"② 路由分流"}
-        ROUTER -->|闲聊| CASUAL["确定性流程\n快速LLM回复"]
-        ROUTER -->|反馈| FEEDBACK["确定性流程\n复用feedback.py"]
-        ROUTER -->|查询| QUERY["确定性流程\n查数据库"]
-        ROUTER -->|简单报障| SIMPLE["固定流程\n知识库+单次LLM"]
-        ROUTER -->|复杂报障| AGENT["Agent流程\nAI+工具调用"]
-    end
+    ROUTER -->|闲聊/反馈/查询| DETER[确定性流程 0-1次LLM]
+    ROUTER -->|简单报障| FIXED[固定流程 知识库+单次LLM]
+    ROUTER -->|复杂报障| AGENT[Agent流程 AI+工具]
 
-    CASUAL --> POST_FLAG{需要存库?}
-    FEEDBACK --> POST_FLAG
-    QUERY --> POST_FLAG
-    SIMPLE --> POST_FLAG
+    DETER --> POST_FLAG{存库?}
+    FIXED --> POST_FLAG
     AGENT --> POST_FLAG
 
     POST_FLAG -->|是| POST
-    POST_FLAG -->|否| RESP
+    POST_FLAG -->|否| RESP[响应返回]
 
-    subgraph POSTPROCESS[后处理层 postprocess.py]
-        POST["③ 后处理"]
-        POST --> SAFE["脱敏回答"]
-        SAFE --> STORE["入库"]
-        STORE --> SUM["LLM 总结"]
-        SUM --> VEC["向量化记忆"]
+    subgraph POST[后处理 postprocess.py]
+        direction LR
+        S1[脱敏] --> S2[入库] --> S3[LLM总结] --> S4[向量化记忆]
     end
 
-    VEC --> RESP[响应返回]
+    POST --> RESP
     RESP --> STREAM
     RESP --> API_USER
 
-    SIMPLE -.-> KB["PostgreSQL 知识库+记忆"]
-    AGENT -.-> KB
-    AGENT -.-> ENG["engineers 负载均衡"]
-    STORE -.-> DB["PostgreSQL 任务/记忆"]
+    FIXED -.-> DB[(PostgreSQL+pgvector)]
+    AGENT -.-> DB
 ```
 
 ### 混合架构说明
