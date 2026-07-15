@@ -9,7 +9,14 @@ from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from .agent_tools import get_all_tools, get_basic_tools
-from .config import LLM_API_KEY, LLM_BASE_URL, MAX_TOOL_ROUNDS, MODEL_ROUTING
+from .config import (
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_REQUEST_TIMEOUT,
+    LLM_REQUEST_TIMEOUT_HARD,
+    MAX_TOOL_ROUNDS,
+    MODEL_ROUTING,
+)
 
 # ==================== 意图上下文 ====================
 
@@ -29,12 +36,14 @@ INTENT_CONTEXT = {
 def _get_llm(complexity: str) -> ChatOpenAI:
     """根据复杂度获取对应的 LLM 实例"""
     config = MODEL_ROUTING.get(complexity, MODEL_ROUTING["medium"])
+    timeout = LLM_REQUEST_TIMEOUT_HARD if complexity == "hard" else LLM_REQUEST_TIMEOUT
     return ChatOpenAI(
         model=config["model"],
         base_url=LLM_BASE_URL,
         api_key=SecretStr(LLM_API_KEY or ""),
         temperature=config["temperature"],
         model_kwargs={"max_tokens": config["max_tokens"]},
+        timeout=timeout,
     )
 
 

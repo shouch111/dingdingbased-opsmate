@@ -1,5 +1,46 @@
 # 更新日志
 
+## [v2.5.0] - 2026-07-15
+
+### 🔒 新增 - API 鉴权（P0-1）
+- 新增 `auth.py`：基于 API Key + 角色的访问控制中间件
+- 三档角色：`service`（写工单）、`readonly`（只读查询）、`admin`（全部）
+- 所有接口（除 `/health`）需在请求头携带 `X-API-Key`
+- `config.py` 新增 `API_ROLES` / `ROLE_KEYS` 配置，Key 留空则该角色不启用
+- `dingtalk_stream.py` 转发时自动携带 service Key
+- 失败统一返回 401/403，错误信息脱敏防探测
+
+### ⚡ 修复 - async 端点同步阻塞（P0-2）
+- `main.py`：`handle_message` / `handle_task` 的同步调用全部包 `run_in_threadpool`，事件循环不再被 LLM 阻塞
+- `dingtalk_stream.py`：`requests.post` 包 `run_in_threadpool`，钉钉消息循环不再串行卡死
+- 修复 `dingtalk_stream.py` 隐藏 bug：`process` 方法恢复 `async def`（原代码丢了 async）
+
+### ⏱️ 新增 - LLM 调用超时机制
+- `config.py` 新增 `LLM_REQUEST_TIMEOUT`（默认 60s）、`LLM_REQUEST_TIMEOUT_HARD`（默认 120s）
+- 全部 7 处 `ChatOpenAI` 实例化加 `timeout=` 参数
+- hard 问题（deepseek-reasoner）单独放宽超时，防止线程池线程被永久占用
+
+### 📝 文档
+- 新增 `优化建议文档.md`：企业生产化优化全景分析（P0-P3 分级）
+- `README.md`：补充鉴权配置说明、API 鉴权说明、LLM 超时配置
+
+---
+
+## [v2.4.0] - 2026-07-10
+
+### 🔄 新增 - 工程师身份按工号绑定
+- 新增 `engineer_matcher.py`：按工号（staff_id）唯一识别工程师身份
+- `database.py`：engineers 表新增 `staff_id` 列（唯一约束），移除 name 的 unique 约束（允许同名）
+- `dingtalk_stream.py`：收到消息自动匹配并回填工程师 staff_id + dingtalk_user_id
+- 首次发消息时用姓名/手机号定位「未绑工号」的工程师，回填后走工号直连
+- 同名场景用手机号消歧，无法唯一确定时不绑定（告警不阻断）
+
+### 🔧 优化 - 敏感信息脱敏
+- `preprocess.py` 新增脱敏层：手机号/IP/邮箱/身份证/密码 -> 占位符
+- `postprocess.py` 对 AI 回答做二次脱敏后存库
+
+---
+
 ## [v2.3.0] - 2026-07-10
 
 ### 🔄 重构 - 负载均衡改为 Skill + Tool 模式

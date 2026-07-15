@@ -13,7 +13,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from . import db_manager
-from .config import LLM_API_KEY, LLM_BASE_URL
+from .config import LLM_API_KEY, LLM_BASE_URL, LLM_REQUEST_TIMEOUT
 from .preprocess import desensitize
 
 # ==================== 辅助函数 ====================
@@ -190,6 +190,7 @@ def _generate_summary(query: str, answer: str) -> str:
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
             model_kwargs={"max_tokens": 100},
+            timeout=LLM_REQUEST_TIMEOUT,
         )
 
         prompt = """请用一句话总结以下运维问答的核心内容（不超过50字）。

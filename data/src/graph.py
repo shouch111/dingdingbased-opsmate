@@ -15,6 +15,9 @@ from pydantic import SecretStr
 from .models import AgentState, Difficulty, Task
 from .tools import DATA_DIR, count_active_tasks, load_engineers, retrieve_knowledge
 
+# LLM 调用超时（秒）
+_GRAPH_LLM_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "60"))
+
 _env_paths = [
     DATA_DIR / ".env",
     DATA_DIR.parent / ".env",
@@ -55,6 +58,7 @@ llm = ChatOpenAI(
     base_url=os.getenv("base_url") or " ",
     api_key=SecretStr(open_code_go_api or ""),
     temperature=0,  # 设为 0 让输出更稳定
+    timeout=_GRAPH_LLM_TIMEOUT,
 )
 
 # ==================== 分类节点 ====================

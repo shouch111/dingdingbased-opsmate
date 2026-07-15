@@ -16,6 +16,7 @@ from dingtalk_stream import (
     DingTalkStreamClient,
 )
 from dotenv import load_dotenv
+from starlette.concurrency import run_in_threadpool
 
 load_dotenv()
 
@@ -23,7 +24,9 @@ CLIENT_ID = os.getenv("DINGTALK_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("DINGTALK_CLIENT_SECRET", "")
 
 # API 转发地址（本地 FastAPI）
-API_MESSAGE_URL = "http://localhost:8000/api/v1/message"
+API_MESSAGE_URL = os.getenv("API_MESSAGE_URL", "http://localhost:8000/api/v1/message")
+# 内部服务调用用的 API Key（与 config.API_KEY_SERVICE 一致）
+API_KEY_SERVICE = os.getenv("API_KEY_SERVICE", "")
 
 
 def _auto_bind_engineer(sender_nick: str, sender_staff_id: str, sender_user_id: str):
@@ -53,7 +56,7 @@ class OpsAgentChatbot(AsyncChatbotHandler):
     收到消息后转发给 API，收到响应后回复用户。
     """
 
-    def process(self, callback_message):
+    async def process(self, callback_message):
         """收到钉钉消息 -> 转发给 API -> 回复用户"""
         incoming_message = ChatbotMessage.from_dict(callback_message.data)
 
@@ -81,17 +84,22 @@ class OpsAgentChatbot(AsyncChatbotHandler):
         print(f"[钉钉] 转发给 API：{question[:80]}...")
 
         # ★ 转发给 API（纯转发，不处理业务）
+        # 用线程池包装同步 requests.post，避免阻塞钉钉事件循环
         try:
-            resp = requests.post(
-                API_MESSAGE_URL,
-                json={
-                    "source": "dingtalk",
-                    "sender_id": bind_id,
-                    "sender_name": sender_nick,
-                    "content": question,
-                    "metadata": {"staff_id": sender_staff_id},
-                },
-                timeout=120,  # LLM 可能需要较长时间
+            headers = {"X-API-Key": API_KEY_SERVICE} if API_KEY_SERVICE else {}
+            resp = await run_in_threadpool(
+                lambda: requests.post(
+                    API_MESSAGE_URL,
+                    json={
+                        "source": "dingtalk",
+                        "sender_id": bind_id,
+                        "sender_name": sender_nick,
+                        "content": question,
+                        "metadata": {"staff_id": sender_staff_id},
+                    },
+                    headers=headers,
+                    timeout=120,  # LLM 可能需要较长时间
+                )
             )
             result = resp.json()
             reply = result.get("response", "处理出错，请重试。")

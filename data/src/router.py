@@ -21,7 +21,12 @@ from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from . import db_manager
-from .config import LLM_API_KEY, LLM_BASE_URL, MODEL_ROUTING
+from .config import (
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_REQUEST_TIMEOUT,
+    MODEL_ROUTING,
+)
 
 # ==================== 辅助函数 ====================
 
@@ -125,6 +130,7 @@ def _handle_casual_chat(desensitized: str, intent: str, complexity: str) -> dict
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0.3,
             model_kwargs={"max_tokens": 200},
+            timeout=LLM_REQUEST_TIMEOUT,
         )
         response = llm.invoke(
             [
@@ -260,6 +266,7 @@ def _handle_simple_report(
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
             model_kwargs={"max_tokens": config["max_tokens"]},
+            timeout=LLM_REQUEST_TIMEOUT,
         )
         response = llm.invoke(
             [

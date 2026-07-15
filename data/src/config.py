@@ -74,3 +74,41 @@ MEMORY_SEARCH_TOP_K = int(os.getenv("MEMORY_SEARCH_TOP_K", "3"))
 
 # AI 工具调用最大轮次（防止死循环）
 MAX_TOOL_ROUNDS = 3
+
+# -------------------- LLM 超时配置 --------------------
+# 单次 LLM 调用超时（秒），超时抛 Timeout 异常由调用方捕获
+# 预处理/摘要等轻量调用默认较短，主流程可适当延长
+LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "60"))
+# hard 问题（deepseek-reasoner）推理慢，单独放宽
+LLM_REQUEST_TIMEOUT_HARD = float(os.getenv("LLM_REQUEST_TIMEOUT_HARD", "120"))
+
+# -------------------- API 鉴权配置 --------------------
+# 角色层级（集合包含，admin 拥有 service 全部权限；readonly 独立只读）
+# service : 仅可调用 POST /api/v1/message（内部服务/机器人）
+# readonly: 仅可调用 GET 管理接口（查询工单/工程师/记忆）
+# admin    : 全部接口
+API_ROLES = {
+    "service": {"/api/v1/message", "/task"},
+    "readonly": {"/tasks", "/engineers", "/memories"},
+    "admin": {"*"},  # 通配，全部放行
+}
+
+# 各角色对应的 API Key（存 .env，留空则该角色禁用）
+API_KEY_SERVICE = os.getenv("API_KEY_SERVICE", "")
+API_KEY_READONLY = os.getenv("API_KEY_READONLY", "")
+API_KEY_ADMIN = os.getenv("API_KEY_ADMIN", "")
+
+# 角色与 Key 的映射（启动时构建，Key 为空的角色不启用）
+ROLE_KEYS = {}
+if API_KEY_ADMIN:
+    ROLE_KEYS["admin"] = API_KEY_ADMIN
+if API_KEY_SERVICE:
+    ROLE_KEYS["service"] = API_KEY_SERVICE
+if API_KEY_READONLY:
+    ROLE_KEYS["readonly"] = API_KEY_READONLY
+
+# 是否打印鉴权配置摘要（启动时）
+_PRINT_AUTH_SUMMARY = os.getenv("AUTH_PRINT_SUMMARY", "true").lower() == "true"
+if _PRINT_AUTH_SUMMARY:
+    _enabled = ", ".join(ROLE_KEYS.keys()) if ROLE_KEYS else "(无，鉴权未生效)"
+    print(f"[config] API 鉴权已启用角色：{_enabled}")

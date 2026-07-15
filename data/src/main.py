@@ -14,10 +14,12 @@ import threading
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from . import db_manager
+from .auth import verify_api_key
 from .database import create_database_if_not_exists, init_db, migrate_engineers_schema
 from .models import AgentState, MessageRequest, MessageResponse, Task
 
@@ -111,11 +113,12 @@ def on_startup():
 
 
 @api.post("/api/v1/message", response_model=MessageResponse)
-async def handle_message(req: MessageRequest):
+async def handle_message(req: MessageRequest, role: str = Depends(verify_api_key)):
     """
     ★ 统一消息入口 -- 所有消息源（钉钉/API/Web）统一走此接口。
 
     混合架构：预处理 -> 路由分流（确定性/简单/Agent）-> 后处理
+    需要 service 角色 API Key。
     """
     from .postprocess import postprocess
     from .preprocess import preprocess
@@ -128,14 +131,16 @@ async def handle_message(req: MessageRequest):
 
     # ① 预处理：脱敏 + 意图检测 + 复杂度检测
     try:
-        pre = preprocess(req.content)
+        pre = await run_in_threadpool(preprocess, req.content)
     except Exception as e:
         print(f"[message] 预处理失败：{e}")
         return MessageResponse(response="处理出错，请重试。")
 
     # ② 混合路由：按意图/复杂度分流处理
     try:
-        result = route(pre, req.sender_name, req.sender_id)
+        result = await run_in_threadpool(
+            route, pre, req.sender_name, req.sender_id
+        )
     except Exception as e:
         print(f"[message] 路由处理失败：{e}")
         return MessageResponse(
@@ -156,7 +161,8 @@ async def handle_message(req: MessageRequest):
 
     if result.get("needs_postprocess"):
         try:
-            post = postprocess(
+            post = await run_in_threadpool(
+                postprocess,
                 raw_query=req.content,
                 ai_response=ai_response,
                 intent=intent,
@@ -185,8 +191,8 @@ async def handle_message(req: MessageRequest):
 
 
 @api.post("/task", response_model=TaskResponse)
-async def handle_task(req: TaskRequest):
-    """旧版接口：接收任务，运行 LangGraph 工作流（兼容保留）。"""
+async def handle_task(req: TaskRequest, role: str = Depends(verify_api_key)):
+    """旧版接口：接收任务，运行 LangGraph 工作流（兼容保留）。需要 service 角色。"""
     from .graph import agent_app
 
     initial_state = AgentState(
@@ -201,7 +207,7 @@ async def handle_task(req: TaskRequest):
         assigned_engineer="",
     )
 
-    result = agent_app.invoke(initial_state)
+    result = await run_in_threadpool(agent_app.invoke, initial_state)
 
     if result["assigned_engineer"]:
         status = "assigned"
@@ -225,7 +231,7 @@ async def health():
 
 
 @api.get("/tasks")
-async def list_tasks(limit: int = 20):
+async def list_tasks(limit: int = 20, role: str = Depends(verify_api_key)):
     try:
         return {"tasks": db_manager.list_recent_tasks(limit)}
     except Exception as e:
@@ -233,7 +239,7 @@ async def list_tasks(limit: int = 20):
 
 
 @api.get("/engineers")
-async def list_engineers():
+async def list_engineers(role: str = Depends(verify_api_key)):
     try:
         engineers = db_manager.load_engineers_from_db()
         for e in engineers:
@@ -244,7 +250,7 @@ async def list_engineers():
 
 
 @api.get("/memories")
-async def list_memories(limit: int = 20):
+async def list_memories(limit: int = 20, role: str = Depends(verify_api_key)):
     """查询最近的交互记忆（调试用）"""
     try:
         return {"memories": db_manager.list_memories(limit)}

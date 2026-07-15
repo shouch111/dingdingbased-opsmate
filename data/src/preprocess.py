@@ -10,7 +10,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from .config import INTENT_LLM_FALLBACK, LLM_API_KEY, LLM_BASE_URL
+from .config import (
+    INTENT_LLM_FALLBACK,
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_REQUEST_TIMEOUT,
+)
 
 # ==================== 辅助函数 ====================
 
@@ -192,6 +197,7 @@ def _llm_detect_intent(text: str) -> tuple[str, float]:
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
             model_kwargs={"max_tokens": 20},
+            timeout=LLM_REQUEST_TIMEOUT,
         )
         prompt = """判断用户消息的意图，只回复一个词：
 - report_issue: 报告IT故障
@@ -300,6 +306,7 @@ def _llm_detect_complexity(text: str) -> str:
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
             model_kwargs={"max_tokens": 10},
+            timeout=LLM_REQUEST_TIMEOUT,
         )
         prompt = """判断IT运维问题的复杂度，只回复一个词：
 - simple: 标准桌面问题（打印机/VPN/邮箱/密码/软件安装）
