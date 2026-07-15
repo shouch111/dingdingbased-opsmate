@@ -20,7 +20,12 @@ from starlette.concurrency import run_in_threadpool
 
 from . import db_manager
 from .auth import verify_api_key
-from .database import create_database_if_not_exists, init_db, migrate_engineers_schema
+from .database import (
+    create_database_if_not_exists,
+    init_db,
+    migrate_difficulty_values,
+    migrate_engineers_schema,
+)
 from .models import AgentState, MessageRequest, MessageResponse, Task
 
 api = FastAPI(title="运维任务分配 Agent")
@@ -97,6 +102,7 @@ def on_startup():
         create_database_if_not_exists()
         init_db()
         migrate_engineers_schema()
+        migrate_difficulty_values()
         migrate_engineers_json_to_db()
     except Exception as e:
         print(f"[startup] ⚠️ 数据库初始化失败，将以降级模式运行：{e}")

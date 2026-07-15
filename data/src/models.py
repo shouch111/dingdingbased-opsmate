@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 
 class Difficulty(str, Enum):
-    EASY = "easy"
+    SIMPLE = "simple"
+    MEDIUM = "medium"
     HARD = "hard"
 
 
@@ -40,7 +41,7 @@ class Task(BaseModel):
     title: str  # 必填
     description: str  # 必填
     submitted_by: str = ""  # 可选，默认空
-    difficulty: Difficulty = Field(default=Difficulty.EASY)
+    difficulty: Difficulty = Field(default=Difficulty.SIMPLE)
 
 
 class Engineer(BaseModel):

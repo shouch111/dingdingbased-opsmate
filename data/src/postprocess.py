@@ -67,7 +67,6 @@ def postprocess(
     if assigned_engineer:
         # 工具已成功分配工程师 -> assigned
         status = "assigned"
-        difficulty = "hard"
     elif intent in ("casual_chat",):
         # 闲聊不入库
         return {
@@ -77,7 +76,9 @@ def postprocess(
         }
     else:
         status = "auto_answered"
-        difficulty = "easy" if complexity == "simple" else "hard"
+
+    # difficulty 与 complexity 取值统一（simple/medium/hard），直接使用
+    difficulty = complexity or "medium"
 
     # 4. assigned_engineer 直接用透传的值（不再从自然语言提取）
 

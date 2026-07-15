@@ -1,5 +1,20 @@
 # 更新日志
 
+## [v2.7.0] - 2026-07-15
+
+### 🔧 修复 - 难度枚举统一（P0-4）
+- **根本问题**：DB `difficulty` 列 Enum 约束为 easy/hard，新架构 `complexity` 用 simple/medium/hard，两者口径冲突，写入 simple/medium 会抛 DataError
+- `database.py`：`difficulty` 列从 `Enum("easy","hard")` 改为 `String(20)`，消除 DB Enum 迁移负担
+- `database.py`：新增 `migrate_difficulty_values()`，启动时将旧值 `easy` -> `simple`（幂等）
+- `main.py`：启动流程增加 `migrate_difficulty_values()` 调用
+- `models.py`：`Difficulty` 枚举从 `EASY/HARD` 改为 `SIMPLE/MEDIUM/HARD`
+- `postprocess.py`：删除 `complexity -> difficulty` 映射，直接用 `complexity` 值作为 `difficulty`（取值已统一）
+- `graph.py`：`CLASSIFY_PROMPT` 和 `classify_node` 的 easy 改为 simple
+- `db_manager.py` / `feedback.py`：注释更新
+- `difficulty` 与 `complexity` 取值完全统一为 simple/medium/hard
+
+---
+
 ## [v2.6.0] - 2026-07-15
 
 ### 🔧 修复 - 任务状态判定改为结构化标记（P0-3）

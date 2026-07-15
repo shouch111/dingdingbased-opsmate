@@ -273,7 +273,7 @@ def _handle_user_unresolved(task: dict, sender_nick: str) -> Optional[dict]:
 
 def _handle_escalation(task: dict, sender_nick: str) -> dict:
     """
-    easy 任务升级：auto_answered → assigned
+    simple 任务升级：auto_answered -> assigned
     调用 assign_engineer() 分配工程师，通知工程师，回复用户。
     """
     from .graph import assign_engineer

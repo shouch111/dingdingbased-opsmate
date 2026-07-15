@@ -115,7 +115,7 @@ class Task(Base):
         String(64), default="", comment="提交人钉钉 ID"
     )
     difficulty: Mapped[str] = mapped_column(
-        Enum("easy", "hard"), nullable=False, comment="难度"
+        String(20), nullable=False, comment="难度（simple/medium/hard，与 complexity 取值统一）"
     )
     status: Mapped[str] = mapped_column(
         Enum("auto_answered", "assigned", "resolved"),
@@ -284,6 +284,26 @@ def migrate_engineers_schema():
         )
         conn.commit()
         print("[database] ✅ engineers 表结构迁移完成（staff_id + name 去 unique）")
+
+
+def migrate_difficulty_values():
+    """
+    tasks.difficulty 值迁移（幂等，安全可重复执行）：
+    将旧值 'easy' 更新为 'simple'，'hard' 不变。
+    适用于 v2.7.0 升级（difficulty 枚举从 easy/hard 统一为 simple/medium/hard）。
+    """
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("UPDATE tasks SET difficulty = 'simple' WHERE difficulty = 'easy'")
+            )
+            conn.commit()
+            if result.rowcount > 0:
+                print(
+                    f"[database] ✅ difficulty 值迁移完成：{result.rowcount} 条 easy -> simple"
+                )
+    except Exception as e:
+        print(f"[database] ⚠️ difficulty 值迁移跳过（表可能不存在）：{e}")
 
 
 def get_db():

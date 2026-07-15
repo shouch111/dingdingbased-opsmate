@@ -330,7 +330,7 @@ def update_task_status(task_id: int, status: str) -> Optional[dict]:
 
 def assign_engineer_to_task(task_id: int, engineer_name: str) -> Optional[dict]:
     """
-    绑定工程师到任务（用于 easy 升级为 assigned 时）。
+    绑定工程师到任务（用于 simple 升级为 assigned 时）。
     同时把状态改为 assigned。
     """
     session = _get_session()
