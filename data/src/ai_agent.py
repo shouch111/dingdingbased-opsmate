@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-from .agent_tools import get_all_tools, get_basic_tools
+from .agent_tools import get_all_tools, get_basic_tools, get_assigned_engineer, reset_assigned_engineer
 from .config import (
     LLM_API_KEY,
     LLM_BASE_URL,
@@ -111,6 +111,9 @@ def ai_process(
     model_name = _get_model_name(complexity)
     print(f"[ai_agent] 复杂度={complexity} 模型={model_name} 意图={intent}")
 
+    # 重置分配标记（防止上次调用的残留）
+    reset_assigned_engineer()
+
     llm = _get_llm(complexity)
     tools = _get_tools(complexity)
 
@@ -190,9 +193,13 @@ def ai_process(
     if tool_rounds > 0:
         print(f"[ai_agent] 工具调用完成，共 {tool_rounds} 轮")
 
+    # 读取工具写入的分配结果（结构化标记，不依赖 LLM 措辞）
+    assigned_engineer = get_assigned_engineer()
+
     return {
         "response": answer,
         "model_used": model_name,
+        "assigned_engineer": assigned_engineer,
     }
 
 

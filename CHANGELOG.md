@@ -1,5 +1,18 @@
 # 更新日志
 
+## [v2.6.0] - 2026-07-15
+
+### 🔧 修复 - 任务状态判定改为结构化标记（P0-3）
+- **根本问题**：原 postprocess 靠字符串匹配 LLM 自然语言回答（`"已分配" in response`）判定任务状态，LLM 措辞变化即失效
+- `agent_tools.py`：`assign_engineer` 工具成功时用 `contextvars` 写入分配结果（并发安全）
+- `ai_agent.py`：`ai_process` 每次调用前重置标记，结束后读取并随返回值透传 `assigned_engineer`
+- `router.py`：`_ok()` / `_handle_agent()` 透传 `assigned_engineer` 字段
+- `main.py`：`postprocess` 调用时传入 `assigned_engineer`
+- `postprocess.py`：根据 `assigned_engineer` 是否非空确定性判定 `status=assigned`，删除 `_extract_engineer()` 正则提取函数
+- 信息流：工具写入结构化标记 -> 逐层透传 -> postprocess 确定性判定，不再经过 LLM 自然语言中转
+
+---
+
 ## [v2.5.0] - 2026-07-15
 
 ### 🔒 新增 - API 鉴权（P0-1）

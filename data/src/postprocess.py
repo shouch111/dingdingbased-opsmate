@@ -48,10 +48,13 @@ def postprocess(
     model_used: str,
     sender_name: str,
     sender_id: str,
+    assigned_engineer: str = "",
 ) -> dict:
     """
     后处理主入口：脱敏 -> 入库 -> 总结 -> 向量化。
 
+    assigned_engineer 由 ai_agent 透传（工具执行时写入），
+    非空表示已分配工程师 -> status=assigned。
     返回 {task_no, memory_saved, response}
     """
     # 1. 对 AI 回答做二次脱敏
@@ -60,10 +63,9 @@ def postprocess(
     # 2. 脱敏后的 query 也存库
     safe_query = desensitize(raw_query)
 
-    # 3. 判断任务状态
-    # 如果 AI 回答中包含"已分配"字样，说明分配了工程师 -> assigned
-    # 否则 -> auto_answered
-    if "已分配" in safe_response or "分配工程师" in safe_response:
+    # 3. 判断任务状态（基于结构化标记，不解析 LLM 自然语言）
+    if assigned_engineer:
+        # 工具已成功分配工程师 -> assigned
         status = "assigned"
         difficulty = "hard"
     elif intent in ("casual_chat",):
@@ -77,8 +79,7 @@ def postprocess(
         status = "auto_answered"
         difficulty = "easy" if complexity == "simple" else "hard"
 
-    # 4. 提取分配的工程师名（如果有）
-    assigned_engineer = _extract_engineer(safe_response)
+    # 4. assigned_engineer 直接用透传的值（不再从自然语言提取）
 
     # 5. 存库
     task_no = ""
@@ -126,33 +127,6 @@ def postprocess(
 
 
 # ==================== 辅助函数 ====================
-
-
-def _extract_engineer(response: str) -> str:
-    """从 AI 回答中提取分配的工程师名"""
-    if "已分配" not in response and "分配工程师" not in response:
-        return ""
-
-    # 尝试匹配"已分配工程师：XXX" 或 "分配给 **XXX**"
-    import re
-
-    patterns = [
-        r"已分配工程师[：:]\s*\**(.+?)\**",
-        r"分配给\s*\**(.+?)\**",
-        r"已分配给\s*\**(.+?)\**",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, response)
-        if match:
-            name = match.group(1).strip().rstrip("*").strip()
-            # 验证是否在工程师名单中
-            try:
-                engineer = db_manager.get_engineer_by_name(name)
-                if engineer:
-                    return name
-            except Exception:
-                pass
-    return ""
 
 
 def _summarize_and_vectorize(

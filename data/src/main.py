@@ -170,6 +170,7 @@ async def handle_message(req: MessageRequest, role: str = Depends(verify_api_key
                 model_used=model_used,
                 sender_name=req.sender_name,
                 sender_id=req.sender_id,
+                assigned_engineer=result.get("assigned_engineer", ""),
             )
             task_no = post["task_no"]
             memory_saved = post["memory_saved"]

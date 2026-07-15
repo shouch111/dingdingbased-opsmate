@@ -49,7 +49,7 @@ def _extract_text(response) -> str:
     return str(content)
 
 
-def _ok(response, model_used="", needs_postprocess=False, intent="", complexity=""):
+def _ok(response, model_used="", needs_postprocess=False, intent="", complexity="", assigned_engineer=""):
     """构造统一返回格式"""
     return {
         "response": response,
@@ -57,6 +57,7 @@ def _ok(response, model_used="", needs_postprocess=False, intent="", complexity=
         "needs_postprocess": needs_postprocess,
         "intent": intent,
         "complexity": complexity,
+        "assigned_engineer": assigned_engineer,
     }
 
 
@@ -314,6 +315,7 @@ def _handle_agent(
             needs_postprocess=True,
             intent=intent,
             complexity=complexity,
+            assigned_engineer=ai_result.get("assigned_engineer", ""),
         )
     except Exception as e:
         print(f"[router] Agent 处理失败：{e}")
