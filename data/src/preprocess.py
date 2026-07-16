@@ -238,6 +238,81 @@ def _llm_detect_intent(text: str) -> tuple[str, float]:
         return ("report_issue", 0.50)
 
 
+def _llm_detect_intent_and_complexity(text: str) -> tuple[str, float, str]:
+    """
+    合并 LLM 调用：一次同时输出意图 + 复杂度（省 1 次 LLM 调用）。
+
+    仅在意图规则和复杂度规则均未命中时调用。
+    返回 (intent, confidence, complexity)
+    """
+    try:
+        llm = ChatOpenAI(
+            model="deepseek-chat",
+            base_url=LLM_BASE_URL,
+            api_key=SecretStr(LLM_API_KEY or ""),
+            temperature=0,
+            model_kwargs={"max_tokens": 30},
+            timeout=LLM_REQUEST_TIMEOUT,
+        )
+        prompt = """判断用户消息的意图和复杂度，只回复一个JSON对象，不要其他内容：
+
+意图可选值：
+- report_issue: 报告IT故障
+- casual_chat: 闲聊问候
+- feedback_resolved: 反馈问题已解决
+- feedback_unresolved: 反馈问题未解决
+- request_human: 要求人工处理
+- query_status: 查询任务状态
+
+复杂度可选值：
+- simple: 标准桌面问题（打印机/VPN/邮箱/密码/软件安装）
+- medium: 需要排查但不算严重（网络慢/软件报错/配置问题）
+- hard: 严重故障需人工介入（服务器宕机/数据库异常/安全事件）
+
+格式：{"intent": "report_issue", "complexity": "simple"}"""
+
+        response = safe_llm_invoke(
+            llm,
+            [
+                SystemMessage(content=prompt),
+                HumanMessage(content=text[:200]),
+            ],
+        )
+        raw = _extract_text(response).strip()
+
+        # 尝试解析 JSON
+        import json as _json
+
+        try:
+            result = _json.loads(raw)
+            intent = result.get("intent", "report_issue").strip().lower()
+            complexity = result.get("complexity", "medium").strip().lower()
+        except _json.JSONDecodeError:
+            # JSON 解析失败，降级为默认值
+            logger.warning("LLM 意图+复杂度 JSON 解析失败，原始响应：%s", raw[:80])
+            intent = "report_issue"
+            complexity = "medium"
+
+        valid_intents = {
+            "report_issue",
+            "casual_chat",
+            "feedback_resolved",
+            "feedback_unresolved",
+            "request_human",
+            "query_status",
+        }
+        if intent not in valid_intents:
+            intent = "report_issue"
+
+        if complexity not in ("simple", "medium", "hard"):
+            complexity = "medium"
+
+        return (intent, 0.80, complexity)
+    except Exception:
+        logger.exception("LLM 意图+复杂度检测失败")
+        return ("report_issue", 0.50, "medium")
+
+
 # ==================== 复杂度检测 ====================
 
 HARD_KEYWORDS = [
@@ -295,64 +370,65 @@ def detect_complexity(text: str, intent: str = "") -> str:
         if kw in text:
             return "hard"
 
-    # 规则未命中 -> LLM 判断
-    if INTENT_LLM_FALLBACK:
-        return _llm_detect_complexity(text)
-
-    # 默认 medium
+    # 规则未命中 -> 返回默认值，LLM 补齐由 preprocess() 统一处理
     return "medium"
 
 
-def _llm_detect_complexity(text: str) -> str:
-    """轻量 LLM 复杂度分类"""
-    try:
-        llm = ChatOpenAI(
-            model="deepseek-chat",
-            base_url=LLM_BASE_URL,
-            api_key=SecretStr(LLM_API_KEY or ""),
-            temperature=0,
-            model_kwargs={"max_tokens": 10},
-            timeout=LLM_REQUEST_TIMEOUT,
-        )
-        prompt = """判断IT运维问题的复杂度，只回复一个词：
-- simple: 标准桌面问题（打印机/VPN/邮箱/密码/软件安装）
-- medium: 需要排查但不算严重（网络慢/软件报错/配置问题）
-- hard: 严重故障需人工介入（服务器宕机/数据库异常/安全事件）
-
-只回复 simple/medium/hard 一个词。"""
-
-        response = safe_llm_invoke(
-            llm,
-            [
-                SystemMessage(content=prompt),
-                HumanMessage(content=text[:200]),
-            ],
-        )
-        result = _extract_text(response).strip().lower()
-        if result in ("simple", "medium", "hard"):
-            return result
-        return "medium"
-    except Exception:
-        logger.exception("LLM 复杂度检测失败")
-        return "medium"
+def _complexity_rule_hit(text: str, intent: str) -> bool:
+    """判断复杂度规则是否命中（与 detect_complexity 的规则逻辑对应）"""
+    if not text:
+        return True
+    text_lower = text.lower()
+    for kw in CASUAL_PATTERNS:
+        if kw.lower() in text_lower:
+            return True
+    if intent in (
+        "feedback_resolved",
+        "feedback_unresolved",
+        "casual_chat",
+        "query_status",
+    ):
+        return True
+    for kw in HARD_KEYWORDS:
+        if kw in text:
+            return True
+    return False
 
 
-# ==================== 预处理主入口 ====================
+# ==================== 预处理主入口 ======================
 
 
 def preprocess(raw_content: str) -> dict:
     """
     预处理主入口：脱敏 -> 意图检测 -> 复杂度检测。
+
+    优化：意图规则和复杂度规则均未命中时，用单次 LLM 同时检测两者（省 1 次调用）。
     返回 {raw_content, desensitized, intent, intent_confidence, complexity}
     """
     # 1. 脱敏
     desensitized = desensitize(raw_content)
 
-    # 2. 意图检测（用原始文本检测，避免脱敏影响关键词）
+    # 2. 意图检测（规则优先）
     intent, confidence = detect_intent(raw_content)
+    intent_from_rule = confidence >= 0.90  # 规则命中的置信度高
 
-    # 3. 复杂度检测（用原始文本检测）
+    # 3. 复杂度检测（规则优先，需要 intent 作为输入）
     complexity = detect_complexity(raw_content, intent)
+    complexity_from_rule = _complexity_rule_hit(raw_content, intent)
+
+    # 4. 两个规则都没命中 -> 单次 LLM 同时补齐意图+复杂度
+    if not intent_from_rule and not complexity_from_rule:
+        if INTENT_LLM_FALLBACK:
+            llm_intent, llm_conf, llm_complexity = _llm_detect_intent_and_complexity(
+                raw_content
+            )
+            intent = llm_intent
+            confidence = llm_conf
+            complexity = llm_complexity
+    elif not intent_from_rule:
+        # 复杂度规则命中但意图未命中 -> 只补意图
+        if INTENT_LLM_FALLBACK:
+            intent, confidence = _llm_detect_intent(raw_content)
 
     logger.info(
         "意图=%s(%d%%) 复杂度=%s 脱敏=%s",

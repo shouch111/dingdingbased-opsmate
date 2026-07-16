@@ -111,15 +111,8 @@ def postprocess(
     except Exception:
         logger.exception("任务存库失败（不阻断流程）")
 
-    # 6. 总结 + 向量化
-    memory_saved = False
-    if task_id is not None:
-        try:
-            memory_saved = _summarize_and_vectorize(
-                safe_query, safe_response, task_id, intent, complexity, model_used
-            )
-        except Exception:
-            logger.exception("记忆向量化失败")
+    # 6. 总结 + 向量化（异步执行，不阻塞响应）
+    # 返回 task_id 供调用方异步触发摘要
 
     # 7. 回答末尾附任务编号
     if task_no:
@@ -127,8 +120,10 @@ def postprocess(
 
     return {
         "task_no": task_no,
-        "memory_saved": memory_saved,
+        "memory_saved": False,
         "response": safe_response,
+        "task_id": task_id,
+        "safe_query": safe_query,
     }
 
 
@@ -143,7 +138,7 @@ def _summarize_and_vectorize(
     complexity: str,
     model_used: str,
 ) -> bool:
-    """总结 query+answer 并向量化存储到记忆库"""
+    """总结 query+answer 并向量化存储到记忆库（同步版本，保留供旧路径调用）"""
     # 1. LLM 生成摘要
     summary = _generate_summary(query, answer)
     if not summary:
@@ -159,6 +154,24 @@ def _summarize_and_vectorize(
         task_id=task_id,
         metadata={"intent": intent, "complexity": complexity},
     )
+
+
+def summarize_and_vectorize_async(
+    safe_query: str,
+    safe_response: str,
+    task_id: int,
+    intent: str,
+    complexity: str,
+    model_used: str,
+):
+    """异步摘要+向量化入口（由 main.py 丢线程池后台执行，不阻塞用户响应）"""
+    try:
+        _summarize_and_vectorize(
+            safe_query, safe_response, task_id, intent, complexity, model_used
+        )
+        logger.info("异步摘要完成 task_id=%d", task_id)
+    except Exception:
+        logger.exception("异步摘要失败 task_id=%d", task_id)
 
 
 def _generate_summary(query: str, answer: str) -> str:

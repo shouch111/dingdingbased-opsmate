@@ -5,6 +5,7 @@ FastAPI 入口 -- 统一 API + 旧版 /task 兼容。
 旧版 POST /task 保留兼容。
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -188,8 +189,24 @@ async def handle_message(req: MessageRequest, role: str = Depends(verify_api_key
                 assigned_engineer=result.get("assigned_engineer", ""),
             )
             task_no = post["task_no"]
-            memory_saved = post["memory_saved"]
             response = post["response"]
+
+            # 摘要异步化：不阻塞响应，丢线程池后台执行
+            task_id = post.get("task_id")
+            if task_id is not None:
+                from .postprocess import summarize_and_vectorize_async
+
+                asyncio.ensure_future(
+                    run_in_threadpool(
+                        summarize_and_vectorize_async,
+                        safe_query=post.get("safe_query", ""),
+                        safe_response=response,
+                        task_id=task_id,
+                        intent=intent,
+                        complexity=complexity,
+                        model_used=model_used,
+                    )
+                )
         except Exception:
             logger.exception("后处理失败")
 

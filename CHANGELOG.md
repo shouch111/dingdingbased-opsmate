@@ -1,5 +1,21 @@
 # 更新日志
 
+## [v3.0.0] - 2026-07-16
+
+### ⚡ 优化 - LLM 调用次数削减 + 摘要异步化（P1-4）
+- **合并意图+复杂度检测**：原两次独立 LLM 调用合并为单次（一个 prompt 同时输出 intent + complexity）
+  - `preprocess.py`：新增 `_llm_detect_intent_and_complexity()` 合并函数
+  - 新增 `_complexity_rule_hit()` 判断规则是否命中，避免不必要的 LLM 调用
+  - 删除 `_llm_detect_complexity()`（已合并）
+  - `detect_complexity()` 不再自调 LLM，由 `preprocess()` 统一调度
+  - 调用次数：规则未命中时 4->3，简单报障 4->2
+- **摘要异步化**：摘要+向量化不再阻塞用户响应
+  - `postprocess.py`：拆出 `summarize_and_vectorize_async()` 独立函数
+  - `main.py`：摘要任务丢 `asyncio.ensure_future(run_in_threadpool(...))` 后台执行
+  - 用户响应延迟降低 1-3 秒（摘要 LLM 耗时不再计入用户等待）
+
+---
+
 ## [v2.9.0] - 2026-07-16
 
 ### 🛡️ 新增 - LLM 重试 + 熔断保护（P1-3）
