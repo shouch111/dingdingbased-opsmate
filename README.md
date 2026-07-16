@@ -1019,7 +1019,7 @@ Agent层（ai_agent.py）：按复杂度路由模型，意图注入，单agent+5
 
 |------|------|------|
 
-| **v2.8.0** | 2026-07-16 | 结构化日志基础设施（log_config + request_id 关联，main.py 已接入） |
+| **v2.8.0** | 2026-07-16 | 结构化日志系统（log_config + request_id 关联 + 全项目 15 模块 print 替换为 logging） |
 
 | v2.7.0 | 2026-07-15 | 难度枚举统一（difficulty 从 easy/hard 改为 simple/medium/hard，与 complexity 一致） |
 
