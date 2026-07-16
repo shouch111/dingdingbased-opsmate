@@ -256,7 +256,11 @@ git clone <your-repo-url>
 
 cd ops-agent
 
+# 开发环境（锁定主依赖版本）
 pip install -r requirements.txt
+
+# 生产部署（精确复现，含全部传递依赖）
+pip install -r requirements.lock
 
 ```
 
@@ -1028,7 +1032,9 @@ Agent层（ai_agent.py）：按复杂度路由模型，意图注入，单agent+5
 
 |------|------|------|
 
-| **v3.1.0** | 2026-07-16 | DB N+1 查询消除（批量统计+复合索引）+ 反馈身份识别改用 staff_id 优先 |
+| **v3.2.0** | 2026-07-16 | 依赖版本锁定（requirements.txt 锁定确切版本 + requirements.lock 完整快照） |
+
+| v3.1.0 | 2026-07-16 | DB N+1 查询消除（批量统计+复合索引）+ 反馈身份识别改用 staff_id 优先 |
 
 | v3.0.0 | 2026-07-16 | LLM 调用次数削减（意图+复杂度合并为单次）+ 摘要异步化（不阻塞用户响应） |
 

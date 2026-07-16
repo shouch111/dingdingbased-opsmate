@@ -1,5 +1,15 @@
 # 更新日志
 
+## [v3.2.0] - 2026-07-16
+
+### 📦 优化 - 依赖版本锁定（P2-1）
+- `requirements.txt`：全部 `>=` 改为确切版本（`==`），确保开发/测试/生产环境一致
+  - langchain 生态、fastapi、pydantic、sqlalchemy、pgvector 等全部锁定
+  - 新增 `tenacity==9.1.2`（v2.9.0 引入但未同步到 requirements.txt）
+- 新增 `requirements.lock`：`pip freeze` 完整快照（含全部传递依赖），用于生产部署精确复现
+
+---
+
 ## [v3.1.0] - 2026-07-16
 
 ### ⚡ 优化 - DB N+1 查询消除（P1-5）
