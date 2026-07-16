@@ -7,6 +7,7 @@
 
 import hashlib
 import json
+import logging
 import time
 from pathlib import Path
 
@@ -14,12 +15,14 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+logger = logging.getLogger(__name__)
+
 DATA_DIR = Path(__file__).parent.parent
 _env_paths = [DATA_DIR / ".env", DATA_DIR.parent / ".env"]
 for _p in _env_paths:
     if _p.exists():
         load_dotenv(_p)
-        print(f"[tools] 已加载环境变量：{_p}")
+        logger.info("已加载环境变量：%s", _p)
         break
 else:
     load_dotenv()
@@ -98,27 +101,28 @@ def sync_knowledge(force: bool = False):
         return
 
     for rel_path in deleted:
-        print(f"[tools] 🗑 删除知识：{rel_path}")
+        logger.debug("删除知识：%s", rel_path)
         db_manager.delete_knowledge_by_source(rel_path)
 
     for rel_path in modified:
-        print(f"[tools] ✏️ 更新知识：{rel_path}")
+        logger.debug("更新知识：%s", rel_path)
         db_manager.delete_knowledge_by_source(rel_path)
         _add_file_to_db(knowledge_dir / rel_path, rel_path, current_index[rel_path])
 
     for rel_path in added:
-        print(f"[tools] ➕ 新增知识：{rel_path}")
+        logger.debug("新增知识：%s", rel_path)
         _add_file_to_db(knowledge_dir / rel_path, rel_path, current_index[rel_path])
 
     total = len(added) + len(deleted) + len(modified)
-    print(
-        f"[tools] 增量同步完成：+{len(added)}/-{len(deleted)}/~{len(modified)}（共 {total} 个文件变更）"
+    logger.info(
+        "增量同步完成：+%s/-%s/~%s（共 %s 个文件变更）",
+        len(added), len(deleted), len(modified), total,
     )
 
 
 def force_rebuild_knowledge():
     """强制全量重建知识库向量索引。"""
-    print("[tools] 🔄 强制全量重建知识库...")
+    logger.info("强制全量重建知识库...")
     sync_knowledge(force=True)
 
 
@@ -133,8 +137,8 @@ def retrieve_knowledge(query: str, top_k: int = 3) -> str:
     if now - _last_sync_time > _SYNC_COOLDOWN:
         try:
             sync_knowledge()
-        except Exception as e:
-            print(f"[tools] 知识库同步失败：{e}")
+        except Exception:
+            logger.exception("知识库同步失败")
         _last_sync_time = now
 
     from . import db_manager
@@ -163,11 +167,11 @@ def load_engineers() -> list[dict]:
         if engineers:
             for e in engineers:
                 e["current_load"] = db_manager.count_active_tasks(e["name"])
-            print(f"[tools] 从 DB 加载 {len(engineers)} 位工程师")
+            logger.info("从 DB 加载 %s 位工程师", len(engineers))
             return engineers
-        print("[tools] DB 工程师表为空，尝试读取 engineers.json")
+        logger.info("DB 工程师表为空，尝试读取 engineers.json")
     except Exception as e:
-        print(f"[tools] ⚠️ DB 加载失败，降级读 engineers.json：{e}")
+        logger.warning("DB 加载失败，降级读 engineers.json：%s", e)
 
     return _load_engineers_from_json()
 
@@ -178,10 +182,10 @@ def _load_engineers_from_json() -> list[dict]:
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             engineers = json.load(f)
-        print(f"[tools] 从 JSON 加载 {len(engineers)} 位工程师")
+        logger.info("从 JSON 加载 %s 位工程师", len(engineers))
         return engineers
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        print(f"[tools] ❌ engineers.json 也不可用：{e}")
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.exception("engineers.json 也不可用")
         return []
 
 

@@ -6,6 +6,7 @@
 - knowledge_docs / memories.embedding：向量数据（pgvector）
 """
 
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column, sessionmaker
 
+logger = logging.getLogger(__name__)
+
 # -------------------- 环境变量加载 --------------------
 
 DATA_DIR = Path(__file__).parent.parent
@@ -36,7 +39,7 @@ _env_paths = [
 for _p in _env_paths:
     if _p.exists():
         load_dotenv(_p)
-        print(f"[database] 已加载环境变量：{_p}")
+        logger.info("已加载环境变量：%s", _p)
         break
 else:
     load_dotenv()
@@ -221,13 +224,13 @@ def create_database_if_not_exists():
         cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (PG_DATABASE,))
         if not cur.fetchone():
             cur.execute(f'CREATE DATABASE "{PG_DATABASE}"')
-            print(f"[database] ✅ 数据库 `{PG_DATABASE}` 已创建")
+            logger.info("数据库 %s 已创建", PG_DATABASE)
         else:
-            print(f"[database] ✅ 数据库 `{PG_DATABASE}` 已存在")
+            logger.info("数据库 %s 已存在", PG_DATABASE)
         cur.close()
         conn.close()
     except Exception as e:
-        print(f"[database] ❌ 创建数据库失败：{e}")
+        logger.error("创建数据库失败：%s", e)
         raise
 
 
@@ -239,7 +242,7 @@ def init_db():
         conn.commit()
     # 建表
     Base.metadata.create_all(engine)
-    print("[database] ✅ 数据库表已就绪（含 pgvector）")
+    logger.info("数据库表已就绪（含 pgvector）")
 
 
 def migrate_engineers_schema():
@@ -283,7 +286,7 @@ def migrate_engineers_schema():
             )
         )
         conn.commit()
-        print("[database] ✅ engineers 表结构迁移完成（staff_id + name 去 unique）")
+        logger.info("engineers 表结构迁移完成（staff_id + name 去 unique）")
 
 
 def migrate_difficulty_values():
@@ -299,11 +302,11 @@ def migrate_difficulty_values():
             )
             conn.commit()
             if result.rowcount > 0:
-                print(
-                    f"[database] ✅ difficulty 值迁移完成：{result.rowcount} 条 easy -> simple"
+                logger.info(
+                    "difficulty 值迁移完成：%s 条 easy -> simple", result.rowcount
                 )
     except Exception as e:
-        print(f"[database] ⚠️ difficulty 值迁移跳过（表可能不存在）：{e}")
+        logger.warning("difficulty 值迁移跳过（表可能不存在）：%s", e)
 
 
 def get_db():

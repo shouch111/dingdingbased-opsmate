@@ -28,6 +28,10 @@ from .config import (
     MODEL_ROUTING,
 )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ==================== 辅助函数 ====================
 
 
@@ -77,7 +81,7 @@ def route(preprocess_result: dict, sender_name: str, sender_id: str) -> dict:
 
     # ① 闲聊 -> 快速 LLM 回复
     if intent == "casual_chat":
-        print("[router] 闲聊 -> 固定流程")
+        logger.info("闲聊 -> 固定流程")
         return _handle_casual_chat(desensitized, intent, complexity)
 
     # ② 反馈 -> 复用 feedback.py
@@ -92,24 +96,24 @@ def route(preprocess_result: dict, sender_name: str, sender_id: str) -> dict:
 
         intent = "report_issue"
         complexity = detect_complexity(raw_content, "report_issue")
-        print(f"[router] 反馈无 active 任务 -> 转为报障 (complexity={complexity})")
+        logger.info("反馈无 active 任务 -> 转为报障 (complexity=%s)", complexity)
 
     # ③ 查询状态 -> 查数据库
     if intent == "query_status":
-        print("[router] 查询状态 -> 固定流程")
+        logger.info("查询状态 -> 固定流程")
         return _handle_query_status(sender_id, intent, complexity)
 
     # ④ 报障/转人工 -> 按复杂度分流
     if intent in ("report_issue", "request_human"):
         if complexity == "simple" and intent == "report_issue":
             # 简单报障 -> 知识库 + 单次 LLM（一步到位）
-            print("[router] 简单报障 -> 固定流程（知识库+单次LLM）")
+            logger.info("简单报障 -> 固定流程（知识库+单次LLM）")
             return _handle_simple_report(
                 desensitized, sender_name, sender_id, intent, complexity
             )
         else:
             # medium/hard 或转人工 -> Agent + 工具
-            print(f"[router] {complexity}报障 -> Agent 流程（工具调用）")
+            logger.info("%s报障 -> Agent 流程（工具调用）", complexity)
             return _handle_agent(
                 preprocess_result, sender_name, sender_id, intent, complexity
             )
@@ -149,8 +153,8 @@ def _handle_casual_chat(desensitized: str, intent: str, complexity: str) -> dict
             intent=intent,
             complexity=complexity,
         )
-    except Exception as e:
-        print(f"[router] 闲聊 LLM 失败：{e}")
+    except Exception:
+        logger.exception("闲聊 LLM 失败")
         return _ok(
             "你好！我是运维助手，有什么可以帮您的？",
             intent=intent,
@@ -177,8 +181,8 @@ def _handle_feedback(
                 complexity=complexity,
             )
         return None
-    except Exception as e:
-        print(f"[router] 反馈处理异常：{e}")
+    except Exception:
+        logger.exception("反馈处理异常")
         return None
 
 
@@ -276,8 +280,8 @@ def _handle_simple_report(
             ]
         )
         answer = _extract_text(response)
-    except Exception as e:
-        print(f"[router] 简单报障 LLM 失败：{e}")
+    except Exception:
+        logger.exception("简单报障 LLM 失败")
         answer = "处理出错，请稍后重试或联系 IT 工程师。"
 
     return _ok(
@@ -317,8 +321,8 @@ def _handle_agent(
             complexity=complexity,
             assigned_engineer=ai_result.get("assigned_engineer", ""),
         )
-    except Exception as e:
-        print(f"[router] Agent 处理失败：{e}")
+    except Exception:
+        logger.exception("Agent 处理失败")
         return _ok(
             "处理出错，请联系 IT 工程师。",
             needs_postprocess=False,

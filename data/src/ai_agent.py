@@ -18,6 +18,10 @@ from .config import (
     MODEL_ROUTING,
 )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ==================== 意图上下文 ====================
 
 INTENT_CONTEXT = {
@@ -109,7 +113,7 @@ def ai_process(
     返回 {response, model_used}
     """
     model_name = _get_model_name(complexity)
-    print(f"[ai_agent] 复杂度={complexity} 模型={model_name} 意图={intent}")
+    logger.info("复杂度=%s 模型=%s 意图=%s", complexity, model_name, intent)
 
     # 重置分配标记（防止上次调用的残留）
     reset_assigned_engineer()
@@ -128,8 +132,8 @@ def ai_process(
         knowledge = retrieve_knowledge(desensitized_content, top_k=3)
         if knowledge and "未找到" not in knowledge and "为空" not in knowledge:
             context_parts.append(f"## 知识库参考\n{knowledge}")
-    except Exception as e:
-        print(f"[ai_agent] 知识库预检索失败：{e}")
+    except Exception:
+        logger.exception("知识库预检索失败")
 
     try:
         from . import memory as memory_module
@@ -137,8 +141,8 @@ def ai_process(
         mem = memory_module.search_memory(desensitized_content)
         if mem:
             context_parts.append(f"## 历史记忆\n{mem}")
-    except Exception as e:
-        print(f"[ai_agent] 记忆预检索失败：{e}")
+    except Exception:
+        logger.exception("记忆预检索失败")
 
     context_text = "\n\n".join(context_parts) if context_parts else "无额外上下文"
 
@@ -163,7 +167,7 @@ def ai_process(
         and tool_rounds < MAX_TOOL_ROUNDS
     ):
         tool_rounds += 1
-        print(f"[ai_agent] 工具调用第 {tool_rounds} 轮")
+        logger.debug("工具调用第 %d 轮", tool_rounds)
 
         # 将 AI 回复加入 messages
         messages.append(response)
@@ -174,7 +178,7 @@ def ai_process(
             tool_args = tool_call["args"]
             tool_id = tool_call["id"]
 
-            print(f"[ai_agent] 调用工具：{tool_name}({tool_args})")
+            logger.debug("调用工具：%s(%s)", tool_name, tool_args)
 
             # 查找并执行工具
             tool_result = _execute_tool(tool_name, tool_args, tools)
@@ -191,7 +195,7 @@ def ai_process(
         answer = _extract_text(response)
 
     if tool_rounds > 0:
-        print(f"[ai_agent] 工具调用完成，共 {tool_rounds} 轮")
+        logger.debug("工具调用完成，共 %d 轮", tool_rounds)
 
     # 读取工具写入的分配结果（结构化标记，不依赖 LLM 措辞）
     assigned_engineer = get_assigned_engineer()

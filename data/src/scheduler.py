@@ -12,11 +12,14 @@
 工程师转派后新工程师的提醒计数自然为 0（按名区分），无需额外重置。
 """
 
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # -------------------- 环境变量加载 --------------------
 
@@ -55,15 +58,15 @@ def check_overdue_tasks():
         if not tasks:
             return
 
-        print(f"[scheduler] 扫描到 {len(tasks)} 个进行中任务")
+        logger.info("扫描到 %d 个进行中任务", len(tasks))
 
         for task in tasks:
             try:
                 _check_single_task(task)
-            except Exception as e:
-                print(f"[scheduler] 任务 {task.get('task_no', '?')} 检查失败：{e}")
-    except Exception as e:
-        print(f"[scheduler] 扫描异常：{e}")
+            except Exception:
+                logger.exception("任务 %s 检查失败", task.get('task_no', '?'))
+    except Exception:
+        logger.exception("扫描异常")
 
 
 def _check_single_task(task: dict):
@@ -116,12 +119,12 @@ def _send_reminder(task: dict, engineer_name: str, count: int):
 
     engineer = db_manager.get_engineer_by_name(engineer_name)
     if not engineer:
-        print(f"[scheduler] 工程师 {engineer_name} 不存在，跳过提醒")
+        logger.info("工程师 %s 不存在，跳过提醒", engineer_name)
         return
 
     dingtalk_user_id = engineer.get("dingtalk_user_id", "")
     if not dingtalk_user_id:
-        print(f"[scheduler] 工程师 {engineer_name} 无钉钉 ID，跳过私聊提醒")
+        logger.info("工程师 %s 无钉钉 ID，跳过私聊提醒", engineer_name)
         return
 
     task_no = task["task_no"]
@@ -144,9 +147,9 @@ def _send_reminder(task: dict, engineer_name: str, count: int):
         from .graph import _send_dingtalk_direct_message
 
         _send_dingtalk_direct_message(dingtalk_user_id, title, text)
-        print(f"[scheduler] ✅ 已提醒 {engineer_name}（任务 {task_no}，第 {count} 次）")
-    except Exception as e:
-        print(f"[scheduler] 提醒发送失败：{e}")
+        logger.info("已提醒 %s（任务 %s，第 %d 次）", engineer_name, task_no, count)
+    except Exception:
+        logger.exception("提醒发送失败")
 
 
 # ==================== 转派逻辑 ====================
@@ -177,23 +180,21 @@ def _try_reassign(task: dict, current_engineer: str):
     if new_engineer:
         # 转派成功
         db_manager.assign_engineer_to_task(task_id, new_engineer)
-        print(
-            f"[scheduler] 🔄 任务 {task_no} 转派：{current_engineer} -> {new_engineer}"
-        )
+        logger.info("任务 %s 转派：%s -> %s", task_no, current_engineer, new_engineer)
 
         # 通知新工程师（钉钉私聊 + 群简报）
         try:
             _notify_engineer(new_engineer, task_obj)
-        except Exception as e:
-            print(f"[scheduler] 转派通知失败：{e}")
+        except Exception:
+            logger.exception("转派通知失败")
 
         # 通知提交人任务已转派
         _notify_submitter_reassign(task, current_engineer, new_engineer)
     else:
         # 无其他人可转派 -> 继续提醒当前工程师 + 通知 IT 群
-        print(
-            f"[scheduler] ⚠️ 任务 {task_no} 已达提醒上限，"
-            f"工程师 {current_engineer} 未响应且无其他人可转派"
+        logger.warning(
+            "任务 %s 已达提醒上限，工程师 %s 未响应且无其他人可转派",
+            task_no, current_engineer,
         )
         _send_reminder(task, current_engineer, REMINDER_MAX_COUNT + 1)
         db_manager.create_reminder(task_id, current_engineer)
@@ -219,8 +220,8 @@ def _notify_submitter_reassign(task: dict, old_engineer: str, new_engineer: str)
 
 因原工程师长时间未响应，已自动转派给 {new_engineer} 处理。"""
         _send_dingtalk_direct_message(submitter_id, title, text)
-    except Exception as e:
-        print(f"[scheduler] 通知提交人转派失败：{e}")
+    except Exception:
+        logger.exception("通知提交人转派失败")
 
 
 def _notify_group_no_reassign(task: dict, engineer_name: str):
@@ -246,8 +247,8 @@ def _notify_group_no_reassign(task: dict, engineer_name: str):
         }
         try:
             requests.post(dingtalk_url, json=payload, timeout=5)
-        except Exception as e:
-            print(f"[scheduler] 钉钉群通知失败：{e}")
+        except Exception:
+            logger.exception("钉钉群通知失败")
 
     if wechat_url and not dingtalk_url:
         payload = {
@@ -256,8 +257,8 @@ def _notify_group_no_reassign(task: dict, engineer_name: str):
         }
         try:
             requests.post(wechat_url, json=payload, timeout=5)
-        except Exception as e:
-            print(f"[scheduler] 企微群通知失败：{e}")
+        except Exception:
+            logger.exception("企微群通知失败")
 
 
 # ==================== 调度器启动 ====================
@@ -271,7 +272,7 @@ def start_scheduler():
     global _scheduler
 
     if _scheduler is not None:
-        print("[scheduler] 调度器已在运行，跳过")
+        logger.info("调度器已在运行，跳过")
         return
 
     try:
@@ -286,12 +287,12 @@ def start_scheduler():
             replace_existing=True,
         )
         _scheduler.start()
-        print(
-            f"[scheduler] ✅ 定时提醒已启动"
-            f"（间隔 {REMINDER_INTERVAL_MINUTES} 分钟，上限 {REMINDER_MAX_COUNT} 次）"
+        logger.info(
+            "定时提醒已启动（间隔 %d 分钟，上限 %d 次）",
+            REMINDER_INTERVAL_MINUTES, REMINDER_MAX_COUNT,
         )
-    except Exception as e:
-        print(f"[scheduler] ❌ 调度器启动失败：{e}")
+    except Exception:
+        logger.exception("调度器启动失败")
 
 
 def stop_scheduler():
@@ -300,4 +301,4 @@ def stop_scheduler():
     if _scheduler:
         _scheduler.shutdown(wait=False)
         _scheduler = None
-        print("[scheduler] 调度器已停止")
+        logger.info("调度器已停止")

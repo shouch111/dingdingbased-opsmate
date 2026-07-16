@@ -17,6 +17,10 @@ from .config import (
     LLM_REQUEST_TIMEOUT,
 )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ==================== 辅助函数 ====================
 
 
@@ -227,8 +231,8 @@ def _llm_detect_intent(text: str) -> tuple[str, float]:
         if intent in valid:
             return (intent, 0.80)
         return ("report_issue", 0.60)
-    except Exception as e:
-        print(f"[preprocess] LLM 意图检测失败：{e}")
+    except Exception:
+        logger.exception("LLM 意图检测失败")
         return ("report_issue", 0.50)
 
 
@@ -325,8 +329,8 @@ def _llm_detect_complexity(text: str) -> str:
         if result in ("simple", "medium", "hard"):
             return result
         return "medium"
-    except Exception as e:
-        print(f"[preprocess] LLM 复杂度检测失败：{e}")
+    except Exception:
+        logger.exception("LLM 复杂度检测失败")
         return "medium"
 
 
@@ -347,9 +351,12 @@ def preprocess(raw_content: str) -> dict:
     # 3. 复杂度检测（用原始文本检测）
     complexity = detect_complexity(raw_content, intent)
 
-    print(
-        f"[preprocess] 意图={intent}({confidence:.0%}) 复杂度={complexity} "
-        f"脱敏={'是' if desensitized != raw_content else '否'}"
+    logger.info(
+        "意图=%s(%d%%) 复杂度=%s 脱敏=%s",
+        intent,
+        int(confidence * 100),
+        complexity,
+        "是" if desensitized != raw_content else "否",
     )
 
     return {

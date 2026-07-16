@@ -2,17 +2,20 @@
 
 ## [v2.8.0] - 2026-07-16
 
-### 📝 新增 - 结构化日志基础设施（P1-1 步骤 1+2）
+### 📝 新增 - 结构化日志系统（P1-1）
 - 新增 `log_config.py`：集中日志配置
   - 自定义格式：`时间 | 级别 | 模块 | req=请求ID | 消息`
   - 双输出：控制台 + 文件轮转（RotatingFileHandler）
   - request_id 请求级关联（contextvars + RequestIdFilter，线程池自动传播）
   - 第三方库噪声抑制（urllib3/httpx/httpcore/DingTalkStreamClient 降为 WARNING）
 - `main.py`：启动时调 `setup_logging()`，`handle_message` 入口生成 request_id
-- `main.py`：print 全部替换为 logger 调用（info/exception）
+- 全项目 15 个模块、约 112 处 `print()` 全部替换为 `logging` 调用：
+  - ✅/普通信息 -> `logger.info`，⚠️ -> `logger.warning`，❌ -> `logger.error`
+  - except 块统一用 `logger.exception()`（自动带完整堆栈）
+  - 调试细节 -> `logger.debug`（生产 INFO 级别不输出，调试时切 DEBUG）
+  - 去掉 emoji 和 `[module]` 前缀，f-string 改为 `%` 风格惰性格式化
 - `.env` 新增日志配置项：`LOG_LEVEL` / `LOG_FILE` / `LOG_MAX_SIZE` / `LOG_BACKUP_COUNT`
 - `.gitignore` 忽略 `data/logs/`
-- 其余 14 个模块的 print 替换将在后续步骤 3 完成
 
 ---
 

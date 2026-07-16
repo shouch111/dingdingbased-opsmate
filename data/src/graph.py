@@ -3,6 +3,7 @@ LangGraph 工作流定义 —— 整个 Agent 的核心调度逻辑。
 """
 
 import json
+import logging
 import os
 from typing import Literal
 
@@ -15,6 +16,8 @@ from pydantic import SecretStr
 from .models import AgentState, Difficulty, Task
 from .tools import DATA_DIR, count_active_tasks, load_engineers, retrieve_knowledge
 
+logger = logging.getLogger(__name__)
+
 # LLM 调用超时（秒）
 _GRAPH_LLM_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "60"))
 
@@ -25,11 +28,11 @@ _env_paths = [
 for _p in _env_paths:
     if _p.exists():
         load_dotenv(_p)
-        print(f"[graph] 已加载环境变量：{_p}")
+        logger.info("已加载环境变量：%s", _p)
         break
-else:
-    load_dotenv()
-    print("[graph] 未找到 .env 文件，使用环境变量或默认值")
+    else:
+        load_dotenv()
+        logger.warning("未找到 .env 文件，使用环境变量或默认值")
 
 
 def _get_text(response) -> str:
@@ -156,13 +159,13 @@ def classify_node(state: AgentState) -> dict:
     user_text_lower = user_text.lower()
     for pattern in CASUAL_PATTERNS:
         if pattern.lower() in user_text_lower:
-            print(f"[classify] 闲聊命中「{pattern}」-> 直接判定为 simple")
+            logger.debug("闲聊命中「%s」-> simple", pattern)
             return {"difficulty": "simple"}
     # =====================================================
 
     for kw in HARD_KEYWORDS:
         if kw in user_text:
-            print(f"[classify] 关键词命中「{kw}」-> 直接判定为 hard")
+            logger.debug("关键词命中「%s」-> hard", kw)
             return {"difficulty": "hard"}
     # =====================================================
 
@@ -250,10 +253,10 @@ def _save_task_to_db(
             final_response=final_response,
         )
         task_no = task_dict.get("task_no", "")
-        print(f"[graph] ✅ 任务已存库：{task_no}（{status}）")
+        logger.info("任务已存库：%s（%s）", task_no, status)
         return task_no
-    except Exception as e:
-        print(f"[graph] ⚠️ 任务存库失败（不阻断流程）：{e}")
+    except Exception:
+        logger.exception("任务存库失败（不阻断流程）")
         return ""
 
 
@@ -354,7 +357,7 @@ def assign_engineer(task: Task, exclude_name: str = "") -> tuple[str, str]:
         candidates_names = result.get("candidates", [])
         reason = result.get("reason", "")
     except json.JSONDecodeError:
-        print("[assign] LLM 返回解析失败，候选人置空")
+        logger.warning("LLM 返回解析失败，候选人置空")
 
     # Step 2: 校验候选人是否真实存在
     matched = [e for e in engineers if e["name"] in candidates_names]
@@ -462,8 +465,8 @@ def assign_node(state: AgentState) -> dict:
     # 发送通知（钉钉私聊 + 群简报 / 企微）
     try:
         _notify_engineer(engineer_name, state.task)
-    except Exception as e:
-        print(f"[assign] 通知发送失败：{e}")
+    except Exception:
+        logger.exception("通知发送失败")
 
     return {
         "assigned_engineer": engineer_name,
@@ -493,7 +496,7 @@ def _get_dingtalk_access_token() -> str:
     client_secret = os.getenv("DINGTALK_CLIENT_SECRET", "")
 
     if not client_id or not client_secret:
-        print("[钉钉API] 未配置 CLIENT_ID / CLIENT_SECRET，无法获取 token")
+        logger.warning("未配置 CLIENT_ID / CLIENT_SECRET，无法获取 token")
         return ""
 
     import requests as _requests
@@ -509,10 +512,10 @@ def _get_dingtalk_access_token() -> str:
         expires_in = data.get("expireIn", 7200)  # 默认 2 小时
         _dingtalk_token_cache["token"] = token
         _dingtalk_token_cache["expires_at"] = now + expires_in - 300  # 提前 5 分钟刷新
-        print(f"[钉钉API] 获取 access_token 成功，有效期 {expires_in}s")
+        logger.info("获取 access_token 成功，有效期 %ss", expires_in)
         return token
-    except Exception as e:
-        print(f"[钉钉API] 获取 access_token 失败：{e}")
+    except Exception:
+        logger.exception("获取 access_token 失败")
         return ""
 
 
@@ -528,12 +531,12 @@ def _send_dingtalk_direct_message(user_id: str, title: str, text: str) -> bool:
     返回：成功返回 True，失败返回 False
     """
     if not user_id:
-        print("[钉钉私聊] user_id 为空，跳过")
+        logger.warning("user_id 为空，跳过")
         return False
 
     token = _get_dingtalk_access_token()
     if not token:
-        print("[钉钉私聊] 无法获取 access_token，跳过")
+        logger.warning("无法获取 access_token，跳过")
         return False
 
     client_id = os.getenv("DINGTALK_CLIENT_ID", "")
@@ -560,13 +563,13 @@ def _send_dingtalk_direct_message(user_id: str, title: str, text: str) -> bool:
         result = resp.json()
         # 成功的响应通常包含 processQueryKey
         if "processQueryKey" in result or resp.status_code == 200:
-            print(f"[钉钉私聊] ✅ 已向 {user_id} 发送私聊提醒")
+            logger.info("已向 %s 发送私聊提醒", user_id)
             return True
         else:
-            print(f"[钉钉私聊] 发送失败：{result}")
+            logger.error("发送失败：%s", result)
             return False
-    except Exception as e:
-        print(f"[钉钉私聊] 请求异常：{e}")
+    except Exception:
+        logger.exception("请求异常")
         return False
 
 
@@ -630,11 +633,11 @@ def _notify_engineer(engineer_name: str, task: Task):
         try:
             resp = requests.post(dingtalk_url, json=dingtalk_payload, timeout=5)
             if resp.status_code == 200:
-                print(f"[钉钉群通知] ✅ 已在群里 @{engineer_name}({mobile})，发送简报")
+                logger.info("已在群里 @%s(%s)，发送简报", engineer_name, mobile)
             else:
-                print(f"[钉钉群通知] 发送失败：{resp.text}")
-        except Exception as e:
-            print(f"[钉钉群通知] 发送异常：{e}")
+                logger.error("发送失败：%s", resp.text)
+        except Exception:
+            logger.exception("发送异常")
 
     # ========== 2. 私聊完整工单（钉钉 Open API）==========
     if dingtalk_user_id:
@@ -654,7 +657,7 @@ def _notify_engineer(engineer_name: str, task: Task):
         _send_dingtalk_direct_message(dingtalk_user_id, dm_title, dm_text)
     elif mobile:
         # 如果没有钉钉 UserId但有手机号，尝试用手机号作为 userId
-        print(f"[钉钉私聊] 未配置 dingtalk_user_id，尝试用手机号 {mobile} 发送")
+        logger.warning("未配置 dingtalk_user_id，尝试用手机号发送")
         dm_title = f"🔧 新任务「{task.title}」"
         dm_text = f"""## 🔧 新任务已分配给你
 
@@ -670,8 +673,8 @@ def _notify_engineer(engineer_name: str, task: Task):
 （此消息仅你可见）"""
         _send_dingtalk_direct_message(mobile, dm_title, dm_text)
     else:
-        print(
-            f"[钉钉私聊] {engineer_name} 未配置 mobile/dingtalk_user_id，跳过私聊提醒"
+        logger.warning(
+            "%s 未配置 mobile/dingtalk_user_id，跳过私聊提醒", engineer_name
         )
 
     # ========== 3. 企业微信兜底 ==========
@@ -689,12 +692,14 @@ def _notify_engineer(engineer_name: str, task: Task):
         }
         try:
             requests.post(wechat_url, json=wechat_payload, timeout=5)
-        except Exception as e:
-            print(f"[企微通知] 发送失败：{e}")
+        except Exception:
+            logger.exception("发送失败")
 
     if not dingtalk_url and not wechat_url:
-        print(
-            f"[通知] 未配置任何 Webhook，跳过。应通知 {engineer_name} 处理：{task.title}"
+        logger.warning(
+            "未配置任何 Webhook，跳过通知。应通知 %s 处理：%s",
+            engineer_name,
+            task.title,
         )
 
 

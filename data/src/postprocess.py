@@ -16,6 +16,10 @@ from . import db_manager
 from .config import LLM_API_KEY, LLM_BASE_URL, LLM_REQUEST_TIMEOUT
 from .preprocess import desensitize
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ==================== 辅助函数 ====================
 
 
@@ -102,9 +106,9 @@ def postprocess(
         )
         task_no = task_dict.get("task_no", "")
         task_id = task_dict.get("id")
-        print(f"[postprocess] ✅ 任务已存库：{task_no}（{status}）")
-    except Exception as e:
-        print(f"[postprocess] ⚠️ 任务存库失败（不阻断流程）：{e}")
+        logger.info("任务已存库：%s（%s）", task_no, status)
+    except Exception:
+        logger.exception("任务存库失败（不阻断流程）")
 
     # 6. 总结 + 向量化
     memory_saved = False
@@ -113,8 +117,8 @@ def postprocess(
             memory_saved = _summarize_and_vectorize(
                 safe_query, safe_response, task_id, intent, complexity, model_used
             )
-        except Exception as e:
-            print(f"[postprocess] ⚠️ 记忆向量化失败：{e}")
+        except Exception:
+            logger.exception("记忆向量化失败")
 
     # 7. 回答末尾附任务编号
     if task_no:
@@ -144,7 +148,7 @@ def _summarize_and_vectorize(
     if not summary:
         return False
 
-    print(f"[postprocess] 📝 摘要：{summary[:60]}...")
+    logger.debug("摘要：%s...", summary[:60])
 
     # 2. 向量化存储（PostgreSQL memories 表，含 embedding）
     from . import memory as memory_module
@@ -190,7 +194,7 @@ AI回答：
 
         summary = _extract_text(response).strip()
         return summary if summary else f"{query[:30]} -> {answer[:30]}"
-    except Exception as e:
-        print(f"[postprocess] LLM 摘要生成失败：{e}")
+    except Exception:
+        logger.exception("LLM 摘要生成失败")
         # 降级：截取前 50 字
         return f"{query[:25]} -> {answer[:25]}"

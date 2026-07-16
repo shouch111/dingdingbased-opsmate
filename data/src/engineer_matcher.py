@@ -24,10 +24,13 @@
 4. 无法唯一确定（同名无法消歧 / 无匹配）-> 不绑定 + 告警（不阻断主流程）
 """
 
+import logging
 import re
 from dataclasses import dataclass
 
 from . import db_manager
+
+logger = logging.getLogger(__name__)
 
 # 手机号正则（与 preprocess 脱敏规则一致，但此处用于"提取"，用途不同，故独立定义）
 _MOBILE_RE = re.compile(r"1[3-9]\d{9}")
@@ -83,7 +86,7 @@ def match_and_bind(
 
     # ---------- 1. 无工号 -> 无法按工号绑定 ----------
     if not staff_id:
-        print(f"[matcher] ⚠️ 无工号，无法按工号绑定：nick={nick} -> 不绑定")
+        logger.warning("无工号，无法按工号绑定：nick=%s -> 不绑定", nick)
         return MatchResult(matched=False, reason="无工号，无法按工号绑定")
 
     # ---------- 2. 工号直连：名单已登记该工号 ----------
@@ -99,9 +102,10 @@ def match_and_bind(
         )
 
     # ---------- 4. 无法定位 -> 不绑定 ----------
-    print(
-        f"[matcher] ⚠️ 无法按工号定位工程师：nick={nick} staff_id={staff_id} "
-        f"mobile={'有' if mobile_in_nick else '无'} -> 不绑定"
+    _mobile_desc = "有" if mobile_in_nick else "无"
+    logger.warning(
+        "无法按工号定位工程师：nick=%s staff_id=%s mobile=%s -> 不绑定",
+        nick, staff_id, _mobile_desc,
     )
     return MatchResult(
         matched=False,
@@ -131,9 +135,10 @@ def _locate_unbound_engineer(pure_nick: str, mobile_in_nick: str) -> dict | None
                 if c.get("mobile") == mobile_in_nick:
                     return c
         names = ",".join(c["name"] for c in candidates)
-        print(
-            f"[matcher] ⚠️ 同名无法消歧：候选={names} "
-            f"mobile={'有' if mobile_in_nick else '无'} -> 不绑定"
+        _mobile_desc = "有" if mobile_in_nick else "无"
+        logger.warning(
+            "同名无法消歧：候选=%s mobile=%s -> 不绑定",
+            names, _mobile_desc,
         )
     return None
 
@@ -161,9 +166,10 @@ def _bind_user_id(eng: dict, user_id: str, reason: str) -> MatchResult:
     filled = bool(user_id and not eng.get("dingtalk_user_id"))
     if filled:
         db_manager.update_engineer_binding(eng["id"], dingtalk_user_id=user_id)
-    print(
-        f"[matcher] 🔗 {reason}：{eng['name']}(id={eng['id']}) "
-        f"绑定 dingtalk_user_id={'是' if filled else '否(已有)'}"
+    _filled_desc = "是" if filled else "否(已有)"
+    logger.info(
+        "%s：%s(id=%s) 绑定 dingtalk_user_id=%s",
+        reason, eng["name"], eng["id"], _filled_desc,
     )
     return MatchResult(
         matched=True,
@@ -184,9 +190,10 @@ def _bind_staff_and_user(
         staff_id=staff_id,
         dingtalk_user_id=user_id if filled_dt else None,
     )
-    print(
-        f"[matcher] 🔗 {reason}：{eng['name']}(id={eng['id']}) "
-        f"回填 staff_id + 绑定 dingtalk_user_id={'是' if filled_dt else '否(已有)'}"
+    _filled_desc = "是" if filled_dt else "否(已有)"
+    logger.info(
+        "%s：%s(id=%s) 回填 staff_id + 绑定 dingtalk_user_id=%s",
+        reason, eng["name"], eng["id"], _filled_desc,
     )
     return MatchResult(
         matched=True,

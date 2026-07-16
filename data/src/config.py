@@ -4,10 +4,13 @@
 新架构核心：预处理层检测复杂度 -> config 路由模型 -> AI 处理层调用。
 """
 
+import logging
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # -------------------- 环境变量加载 --------------------
 
@@ -19,7 +22,7 @@ _env_paths = [
 for _p in _env_paths:
     if _p.exists():
         load_dotenv(_p)
-        print(f"[config] 已加载环境变量：{_p}")
+        logger.info("已加载环境变量：%s", _p)
         break
 else:
     load_dotenv()
@@ -111,4 +114,4 @@ if API_KEY_READONLY:
 _PRINT_AUTH_SUMMARY = os.getenv("AUTH_PRINT_SUMMARY", "true").lower() == "true"
 if _PRINT_AUTH_SUMMARY:
     _enabled = ", ".join(ROLE_KEYS.keys()) if ROLE_KEYS else "(无，鉴权未生效)"
-    print(f"[config] API 鉴权已启用角色：{_enabled}")
+    logger.info("API 鉴权已启用角色：%s", _enabled)

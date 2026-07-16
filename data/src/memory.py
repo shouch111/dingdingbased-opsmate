@@ -5,8 +5,12 @@
 每次交互后由后处理层调用 save_memory 存储，AI 处理层调用 search_memory 检索。
 """
 
+import logging
+
 from . import db_manager
 from .config import MEMORY_ENABLED, MEMORY_SEARCH_TOP_K
+
+logger = logging.getLogger(__name__)
 
 
 def save_memory(
@@ -37,10 +41,10 @@ def save_memory(
             complexity=complexity,
             embedding=embedding,
         )
-        print(f"[memory] ✅ 记忆已存储：{summary[:50]}...")
+        logger.info("记忆已存储：%s...", summary[:50])
         return True
-    except Exception as e:
-        print(f"[memory] ❌ 存储失败：{e}")
+    except Exception:
+        logger.exception("存储失败")
         return False
 
 
@@ -70,10 +74,10 @@ def search_memory(query: str, top_k: int | None = None) -> str:
 
         results = [f"- {m['summary']}" for m in mems]
         memory_text = "\n".join(results)
-        print(f"[memory] 🔍 检索到 {len(mems)} 条相关记忆")
+        logger.info("检索到 %s 条相关记忆", len(mems))
         return memory_text
-    except Exception as e:
-        print(f"[memory] ❌ 检索失败：{e}")
+    except Exception:
+        logger.exception("检索失败")
         return ""
 
 

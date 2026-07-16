@@ -9,9 +9,12 @@
 反馈处理不经过 LangGraph 主流程，直接操作数据库 + 复用 assign_engineer()。
 """
 
+import logging
 from typing import Optional
 
 from . import db_manager
+
+logger = logging.getLogger(__name__)
 
 # ==================== 关键词定义 ====================
 
@@ -77,8 +80,8 @@ def identify_sender(sender_nick: str, sender_id: str) -> tuple[str, Optional[dic
         engineer = db_manager.get_engineer_by_name(sender_nick)
         if engineer:
             return ("engineer", engineer)
-    except Exception as e:
-        print(f"[feedback] 查询工程师身份失败：{e}")
+    except Exception:
+        logger.exception("查询工程师身份失败")
 
     return ("user", None)
 
@@ -216,8 +219,8 @@ def _notify_submitter(task: dict, engineer_name: str):
 您的运维问题已由工程师 {engineer_name} 处理完成。
 如仍有问题，请回复说明。"""
         _send_dingtalk_direct_message(submitter_id, title, text)
-    except Exception as e:
-        print(f"[feedback] 通知提交人失败：{e}")
+    except Exception:
+        logger.exception("通知提交人失败")
 
 
 # ==================== 用户消息处理 ====================
@@ -302,8 +305,8 @@ def _handle_escalation(task: dict, sender_nick: str) -> dict:
         from .graph import _notify_engineer
 
         _notify_engineer(engineer_name, task_obj)
-    except Exception as e:
-        print(f"[feedback] 升级通知工程师失败：{e}")
+    except Exception:
+        logger.exception("升级通知工程师失败")
 
     reply = (
         f"自动回答未能解决您的问题，已为您转给工程师 **{engineer_name}**，请稍候。\n"
@@ -338,8 +341,8 @@ def _handle_re_escalation(task: dict, sender_nick: str) -> dict:
 用户反馈该问题仍未解决，请尽快跟进处理。
 处理完成后请回复「已解决」。"""
             _send_dingtalk_direct_message(dingtalk_user_id, title, text)
-    except Exception as e:
-        print(f"[feedback] 催办通知失败：{e}")
+    except Exception:
+        logger.exception("催办通知失败")
 
     reply = (
         f"已再次通知工程师 **{engineer_name}**，请稍候。\n"

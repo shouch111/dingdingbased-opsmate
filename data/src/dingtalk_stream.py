@@ -6,6 +6,7 @@
 所有业务逻辑（预处理/AI/后处理）集中在 API 层。
 """
 
+import logging
 import os
 
 import requests
@@ -17,6 +18,8 @@ from dingtalk_stream import (
 )
 from dotenv import load_dotenv
 from starlette.concurrency import run_in_threadpool
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -45,9 +48,9 @@ def _auto_bind_engineer(sender_nick: str, sender_staff_id: str, sender_user_id: 
             sender_user_id=sender_user_id,
         )
         if not result.matched:
-            print(f"[钉钉] ⚠️ 工程师身份未绑定：{sender_nick}（{result.reason}）")
-    except Exception as e:
-        print(f"[钉钉] ⚠️ 工程师身份匹配失败：{e}")
+            logger.warning("工程师身份未绑定：%s（%s）", sender_nick, result.reason)
+    except Exception:
+        logger.exception("工程师身份匹配失败")
 
 
 class OpsAgentChatbot(AsyncChatbotHandler):
@@ -61,7 +64,7 @@ class OpsAgentChatbot(AsyncChatbotHandler):
         incoming_message = ChatbotMessage.from_dict(callback_message.data)
 
         sender_nick = incoming_message.sender_nick or "用户"
-        print(f"[钉钉] 收到消息：{sender_nick}")
+        logger.info("收到消息：%s", sender_nick)
 
         # 自动匹配并回填工程师身份（工号 / 钉钉 userId）
         sender_id = getattr(incoming_message, "sender_id", "")
@@ -74,14 +77,14 @@ class OpsAgentChatbot(AsyncChatbotHandler):
         # 提取文本
         text_list = incoming_message.get_text_list()
         if not text_list:
-            print(f"[钉钉] 非文本消息（来自 {sender_nick}），已忽略")
+            logger.info("非文本消息（来自 %s），已忽略", sender_nick)
             return
 
         question = "\n".join([t.strip() for t in text_list if t.strip()])
         if not question:
             return
 
-        print(f"[钉钉] 转发给 API：{question[:80]}...")
+        logger.info("转发给 API：%s...", question[:80])
 
         # ★ 转发给 API（纯转发，不处理业务）
         # 用线程池包装同步 requests.post，避免阻塞钉钉事件循环
@@ -104,31 +107,27 @@ class OpsAgentChatbot(AsyncChatbotHandler):
             result = resp.json()
             reply = result.get("response", "处理出错，请重试。")
         except requests.exceptions.Timeout:
-            print(f"[钉钉] API 转发超时")
+            logger.warning("API 转发超时")
             reply = "处理超时，请稍后重试，或联系 IT 工程师。"
-        except Exception as e:
-            print(f"[钉钉] API 转发失败：{e}")
+        except Exception:
+            logger.exception("API 转发失败")
             reply = "处理出错，请联系 IT 工程师。"
 
         # 回复用户
         try:
             self.reply_markdown("运维助手", reply, incoming_message)
-            print(f"[钉钉] 已回复 {sender_nick}")
-        except Exception as e:
-            print(f"[钉钉] 回复发送失败：{e}")
+            logger.info("已回复 %s", sender_nick)
+        except Exception:
+            logger.exception("回复发送失败")
 
 
 def start_stream_bot():
     """启动钉钉 Stream 长连接，阻塞运行。"""
-    print(
-        f"[钉钉 Stream] CLIENT_ID={CLIENT_ID[:6]}***"
-        if CLIENT_ID
-        else "[钉钉 Stream] CLIENT_ID=(空)"
-    )
-    print(f"[钉钉 Stream] CLIENT_SECRET={'已配置' if CLIENT_SECRET else '(空)'}")
+    logger.info("CLIENT_ID 已配置" if CLIENT_ID else "CLIENT_ID 未配置")
+    logger.info("CLIENT_SECRET 已配置" if CLIENT_SECRET else "CLIENT_SECRET 未配置")
 
     if not CLIENT_ID or not CLIENT_SECRET:
-        print("[钉钉 Stream] 未配置 CLIENT_ID / CLIENT_SECRET，跳过启动。")
+        logger.info("未配置 CLIENT_ID / CLIENT_SECRET，跳过启动。")
         return
 
     credential = Credential(CLIENT_ID, CLIENT_SECRET)
@@ -137,9 +136,9 @@ def start_stream_bot():
 
     client.register_callback_handler(ChatbotMessage.TOPIC, handler)
 
-    print(f"[钉钉 Stream] 正在连接（topic: {ChatbotMessage.TOPIC}）...")
+    logger.info("正在连接（topic: %s）...", ChatbotMessage.TOPIC)
     try:
         client.start_forever()
-    except Exception as e:
-        print(f"[钉钉 Stream] 连接异常：{e}")
+    except Exception:
+        logger.exception("连接异常")
         raise
