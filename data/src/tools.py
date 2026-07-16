@@ -165,8 +165,10 @@ def load_engineers() -> list[dict]:
 
         engineers = db_manager.load_engineers_from_db()
         if engineers:
+            # 批量计算负载（1 条 SQL 替代 N 条，消除 N+1）
+            load_map = db_manager.count_active_tasks_batch()
             for e in engineers:
-                e["current_load"] = db_manager.count_active_tasks(e["name"])
+                e["current_load"] = load_map.get(e["name"], 0)
             logger.info("从 DB 加载 %s 位工程师", len(engineers))
             return engineers
         logger.info("DB 工程师表为空，尝试读取 engineers.json")

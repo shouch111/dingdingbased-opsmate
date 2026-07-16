@@ -381,6 +381,31 @@ def count_active_tasks(engineer_name: str) -> int:
         session.close()
 
 
+def count_active_tasks_batch() -> dict[str, int]:
+    """
+    一条 SQL 批量计算所有工程师的活跃任务数。
+    返回 {engineer_name: count}，未出现的工程师不在字典中（调用方默认 0）。
+    替代逐人调 count_active_tasks 的 N+1 模式。
+    """
+    session = _get_session()
+    try:
+        rows = (
+            session.query(
+                Task.assigned_engineer,
+                func.count(Task.id).label("cnt"),
+            )
+            .filter(
+                Task.assigned_engineer != "",
+                Task.status == "assigned",
+            )
+            .group_by(Task.assigned_engineer)
+            .all()
+        )
+        return {row[0]: row[1] for row in rows}
+    finally:
+        session.close()
+
+
 def list_recent_tasks(limit: int = 20) -> list[dict]:
     """查询最近任务列表（供 API /tasks 用）"""
     session = _get_session()

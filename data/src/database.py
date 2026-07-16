@@ -235,14 +235,29 @@ def create_database_if_not_exists():
 
 
 def init_db():
-    """建表 + 安装 pgvector 扩展。"""
+    """建表 + 安装 pgvector 扩展 + 创建索引。"""
     # 安装 pgvector 扩展
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.commit()
     # 建表
     Base.metadata.create_all(engine)
-    logger.info("数据库表已就绪（含 pgvector）")
+    # 创建复合索引（幂等，加速按提交人/工程师查活跃任务的查询）
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_submitter_status "
+                "ON tasks (submitter_id, status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_engineer_status "
+                "ON tasks (assigned_engineer, status)"
+            )
+        )
+        conn.commit()
+    logger.info("数据库表已就绪（含 pgvector + 复合索引）")
 
 
 def migrate_engineers_schema():

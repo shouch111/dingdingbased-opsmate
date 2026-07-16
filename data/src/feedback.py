@@ -69,19 +69,30 @@ def identify_sender(sender_nick: str, sender_id: str) -> tuple[str, Optional[dic
     """
     识别发送者身份：是工程师还是普通用户。
 
-    返回:
-        ('engineer', engineer_dict)  — 是工程师
-        ('user', None)               — 是普通用户
-    """
-    if not sender_nick:
-        return ("user", None)
+    优先用 staff_id（工号）查找，唯一识别不受同名影响；
+    staff_id 未命中时按姓名降级，兼容 API 提交无 staff_id 的场景。
 
-    try:
-        engineer = db_manager.get_engineer_by_name(sender_nick)
-        if engineer:
-            return ("engineer", engineer)
-    except Exception:
-        logger.exception("查询工程师身份失败")
+    返回:
+        ('engineer', engineer_dict)  - 是工程师
+        ('user', None)               - 是普通用户
+    """
+    # ① 优先用 staff_id 查找（唯一识别，不受同名影响）
+    if sender_id:
+        try:
+            engineer = db_manager.get_engineer_by_staff_id(sender_id)
+            if engineer:
+                return ("engineer", engineer)
+        except Exception:
+            logger.exception("按工号查询工程师身份失败")
+
+    # ② staff_id 未命中 -> 按姓名降级（兼容 API 提交无 staff_id 的场景）
+    if sender_nick:
+        try:
+            engineer = db_manager.get_engineer_by_name(sender_nick)
+            if engineer:
+                return ("engineer", engineer)
+        except Exception:
+            logger.exception("按姓名查询工程师身份失败")
 
     return ("user", None)
 

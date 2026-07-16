@@ -1,5 +1,21 @@
 # 更新日志
 
+## [v3.1.0] - 2026-07-16
+
+### ⚡ 优化 - DB N+1 查询消除（P1-5）
+- `db_manager.py`：新增 `count_active_tasks_batch()`，一条 SQL 批量统计所有工程师活跃任务数
+- `tools.py` / `main.py` /engineers 接口 / `graph.py` assign_engineer / assign_engineer_by_algorithm：逐人查负载改为批量统计，1+N 次查询降为 2 次
+- `database.py`：`init_db()` 新增 2 个复合索引
+  - `idx_tasks_submitter_status`（submitter_id, status）-- 加速按用户查活跃任务
+  - `idx_tasks_engineer_status`（assigned_engineer, status）-- 加速按工程师查活跃任务/统计负载
+
+### 🔧 修复 - 反馈身份识别改用 staff_id（P1-6）
+- `feedback.py`：`identify_sender()` 优先用 staff_id 查找工程师，姓名降级兼容
+  - 钉钉链路：sender_id 是 staff_id，精确匹配，彻底解决同名工程师反馈命中错误的问题
+  - API 链路：sender_id 可能为空，降级走姓名匹配，兼容旧行为
+
+---
+
 ## [v3.0.0] - 2026-07-16
 
 ### ⚡ 优化 - LLM 调用次数削减 + 摘要异步化（P1-4）

@@ -275,8 +275,10 @@ async def list_tasks(limit: int = 20, role: str = Depends(verify_api_key)):
 async def list_engineers(role: str = Depends(verify_api_key)):
     try:
         engineers = db_manager.load_engineers_from_db()
+        # 批量计算负载（1 条 SQL 替代 N 条，消除 N+1）
+        load_map = db_manager.count_active_tasks_batch()
         for e in engineers:
-            e["current_load"] = db_manager.count_active_tasks(e["name"])
+            e["current_load"] = load_map.get(e["name"], 0)
         return {"engineers": engineers}
     except Exception as e:
         return {"error": str(e), "engineers": []}

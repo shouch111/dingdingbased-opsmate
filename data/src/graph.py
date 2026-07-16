@@ -15,7 +15,7 @@ from pydantic import SecretStr
 
 from .models import AgentState, Difficulty, Task
 from .llm_utils import safe_llm_invoke
-from .tools import DATA_DIR, count_active_tasks, load_engineers, retrieve_knowledge
+from .tools import DATA_DIR, load_engineers, retrieve_knowledge
 
 logger = logging.getLogger(__name__)
 
@@ -372,9 +372,12 @@ def assign_engineer(task: Task, exclude_name: str = "") -> tuple[str, str]:
     available_pool = [e for e in matched if e.get("available", True)]
     pool = available_pool if available_pool else matched
 
-    # Step 4: 动态计算负载
+    # Step 4: 批量计算负载（1 条 SQL 替代 N 条，消除 N+1）
+    from . import db_manager
+
+    load_map = db_manager.count_active_tasks_batch()
     for e in pool:
-        e["current_load"] = count_active_tasks(e["name"])
+        e["current_load"] = load_map.get(e["name"], 0)
 
     # Step 5: 选最低负载
     min_load = min(e["current_load"] for e in pool)
@@ -414,9 +417,12 @@ def assign_engineer_by_algorithm(candidate_names: list[str]) -> tuple[str, str]:
     available_pool = [e for e in matched if e.get("available", True)]
     pool = available_pool if available_pool else matched
 
-    # 动态计算负载
+    # 批量计算负载（1 条 SQL 替代 N 条，消除 N+1）
+    from . import db_manager
+
+    load_map = db_manager.count_active_tasks_batch()
     for e in pool:
-        e["current_load"] = count_active_tasks(e["name"])
+        e["current_load"] = load_map.get(e["name"], 0)
 
     # 选最低负载
     min_load = min(e["current_load"] for e in pool)
