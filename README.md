@@ -362,6 +362,14 @@ API_KEY_ADMIN=your-admin-key-here
 # 钉钉 Stream 转发地址（默认本地，可选）
 API_MESSAGE_URL=http://localhost:8000/api/v1/message
 
+
+
+# ========== 日志（可选）==========
+LOG_LEVEL=INFO              # DEBUG/INFO/WARNING/ERROR
+LOG_FILE=data/logs/ops_agent.log  # 日志文件路径，留空则仅控制台
+LOG_MAX_SIZE=10             # 单文件最大 MB，超过自动轮转
+LOG_BACKUP_COUNT=5          # 保留几个历史日志文件
+
 ```
 
 
@@ -1011,7 +1019,9 @@ Agent层（ai_agent.py）：按复杂度路由模型，意图注入，单agent+5
 
 |------|------|------|
 
-| **v2.7.0** | 2026-07-15 | 难度枚举统一（difficulty 从 easy/hard 改为 simple/medium/hard，与 complexity 一致） |
+| **v2.8.0** | 2026-07-16 | 结构化日志基础设施（log_config + request_id 关联，main.py 已接入） |
+
+| v2.7.0 | 2026-07-15 | 难度枚举统一（difficulty 从 easy/hard 改为 simple/medium/hard，与 complexity 一致） |
 
 | v2.6.0 | 2026-07-15 | 任务状态判定改为结构化标记透传（不再字符串匹配 LLM 回答） |
 

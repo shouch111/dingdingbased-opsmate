@@ -6,6 +6,7 @@ FastAPI 入口 -- 统一 API + 旧版 /task 兼容。
 """
 
 import json
+import logging
 import os
 
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
@@ -26,7 +27,13 @@ from .database import (
     migrate_difficulty_values,
     migrate_engineers_schema,
 )
+from .log_config import gen_request_id, set_request_id, setup_logging
 from .models import AgentState, MessageRequest, MessageResponse, Task
+
+# 启动时初始化日志系统（最先执行，后续日志走统一格式）
+setup_logging()
+
+logger = logging.getLogger(__name__)
 
 api = FastAPI(title="运维任务分配 Agent")
 
@@ -72,11 +79,11 @@ def migrate_engineers_json_to_db():
     json_path = Path(__file__).parent.parent / "engineers.json"
 
     if db_manager.count_engineers() > 0:
-        print("[迁移] engineers 表已有数据，跳过 JSON 迁移")
+        logger.info("engineers 表已有数据，跳过 JSON 迁移")
         return
 
     if not json_path.exists():
-        print("[迁移] engineers.json 不存在，跳过")
+        logger.info("engineers.json 不存在，跳过")
         return
 
     try:
@@ -90,9 +97,9 @@ def migrate_engineers_json_to_db():
             e["name"] = clean_name
             e["mobile"] = clean_mobile
             db_manager.create_engineer(e)
-        print(f"[迁移] 已导入 {len(engineers)} 位工程师到数据库")
-    except Exception as e:
-        print(f"[迁移] ❌ 导入失败：{e}")
+        logger.info("已导入 %d 位工程师到数据库", len(engineers))
+    except Exception:
+        logger.exception("工程师导入失败")
 
 
 @api.on_event("startup")
@@ -104,15 +111,15 @@ def on_startup():
         migrate_engineers_schema()
         migrate_difficulty_values()
         migrate_engineers_json_to_db()
-    except Exception as e:
-        print(f"[startup] ⚠️ 数据库初始化失败，将以降级模式运行：{e}")
+    except Exception:
+        logger.exception("数据库初始化失败，将以降级模式运行")
 
     try:
         from .scheduler import start_scheduler
 
         start_scheduler()
-    except Exception as e:
-        print(f"[startup] ⚠️ 定时提醒启动失败：{e}")
+    except Exception:
+        logger.exception("定时提醒启动失败")
 
 
 # ==================== 新架构：统一消息入口 ====================
@@ -130,16 +137,18 @@ async def handle_message(req: MessageRequest, role: str = Depends(verify_api_key
     from .preprocess import preprocess
     from .router import route
 
-    print(f"\n{'=' * 60}")
-    print(f"[message] 来源={req.source} 发送者={req.sender_name}")
-    print(f"[message] 内容={req.content[:80]}...")
-    print(f"{'=' * 60}")
+    # 生成请求级 ID，透传到整个调用链（contextvars + 线程池自动传播）
+    request_id = gen_request_id()
+    set_request_id(request_id)
+
+    logger.info("收到消息 来源=%s 发送者=%s", req.source, req.sender_name)
+    logger.debug("消息内容：%s", req.content[:80])
 
     # ① 预处理：脱敏 + 意图检测 + 复杂度检测
     try:
         pre = await run_in_threadpool(preprocess, req.content)
-    except Exception as e:
-        print(f"[message] 预处理失败：{e}")
+    except Exception:
+        logger.exception("预处理失败")
         return MessageResponse(response="处理出错，请重试。")
 
     # ② 混合路由：按意图/复杂度分流处理
@@ -147,8 +156,8 @@ async def handle_message(req: MessageRequest, role: str = Depends(verify_api_key
         result = await run_in_threadpool(
             route, pre, req.sender_name, req.sender_id
         )
-    except Exception as e:
-        print(f"[message] 路由处理失败：{e}")
+    except Exception:
+        logger.exception("路由处理失败")
         return MessageResponse(
             intent=pre["intent"],
             complexity=pre["complexity"],
@@ -181,8 +190,8 @@ async def handle_message(req: MessageRequest, role: str = Depends(verify_api_key
             task_no = post["task_no"]
             memory_saved = post["memory_saved"]
             response = post["response"]
-        except Exception as e:
-            print(f"[message] 后处理失败：{e}")
+        except Exception:
+            logger.exception("后处理失败")
 
     return MessageResponse(
         intent=intent,
@@ -272,7 +281,7 @@ if __name__ == "__main__":
     enable_dingtalk = bool(os.getenv("DINGTALK_CLIENT_ID", ""))
 
     if enable_dingtalk:
-        print("[启动] 在后台线程启动钉钉 Stream 连接...")
+        logger.info("在后台线程启动钉钉 Stream 连接...")
         thread = threading.Thread(
             target=start_stream_bot,
             daemon=True,
