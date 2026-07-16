@@ -17,6 +17,7 @@ from .config import (
     MAX_TOOL_ROUNDS,
     MODEL_ROUTING,
 )
+from .llm_utils import safe_llm_invoke
 
 import logging
 
@@ -156,7 +157,7 @@ def ai_process(
     # 绑定工具并调用
     llm_with_tools = llm.bind_tools(tools) if tools else llm
 
-    response = llm_with_tools.invoke(messages)
+    response = safe_llm_invoke(llm_with_tools, messages)
     answer = _extract_text(response)
 
     # 处理工具调用（最多 MAX_TOOL_ROUNDS 轮）
@@ -191,7 +192,7 @@ def ai_process(
             )
 
         # 再次调用 LLM 处理工具结果
-        response = llm_with_tools.invoke(messages)
+        response = safe_llm_invoke(llm_with_tools, messages)
         answer = _extract_text(response)
 
     if tool_rounds > 0:

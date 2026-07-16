@@ -14,6 +14,7 @@ from langgraph.graph import END, StateGraph
 from pydantic import SecretStr
 
 from .models import AgentState, Difficulty, Task
+from .llm_utils import safe_llm_invoke
 from .tools import DATA_DIR, count_active_tasks, load_engineers, retrieve_knowledge
 
 logger = logging.getLogger(__name__)
@@ -173,7 +174,7 @@ def classify_node(state: AgentState) -> dict:
         SystemMessage(content=CLASSIFY_PROMPT),
         HumanMessage(content=f"任务标题：{task.title}\n任务描述：{task.description}"),
     ]
-    response = llm.invoke(messages)
+    response = safe_llm_invoke(llm, messages)
 
     # 解析 LLM 返回的 JSON
     try:
@@ -285,7 +286,7 @@ def answer_node(state: AgentState) -> dict:
             content=f"问题：{state.task.title}\n详细描述：{state.task.description}"
         ),
     ]
-    response = llm.invoke(messages)
+    response = safe_llm_invoke(llm, messages)
     answer = _get_text(response)
 
     # 存库（auto_answered），失败不阻断主流程
@@ -348,7 +349,7 @@ def assign_engineer(task: Task, exclude_name: str = "") -> tuple[str, str]:
         ),
         HumanMessage(content=f"任务：{task.title}\n描述：{task.description}"),
     ]
-    response = llm.invoke(messages)
+    response = safe_llm_invoke(llm, messages)
 
     candidates_names = []
     reason = ""

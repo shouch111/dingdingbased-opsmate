@@ -27,6 +27,7 @@ from .config import (
     LLM_REQUEST_TIMEOUT,
     MODEL_ROUTING,
 )
+from .llm_utils import safe_llm_invoke
 
 import logging
 
@@ -137,13 +138,14 @@ def _handle_casual_chat(desensitized: str, intent: str, complexity: str) -> dict
             model_kwargs={"max_tokens": 200},
             timeout=LLM_REQUEST_TIMEOUT,
         )
-        response = llm.invoke(
+        response = safe_llm_invoke(
+            llm,
             [
                 SystemMessage(
                     content="你是公司IT运维助手，用户在闲聊。请友好简短回复，不超过2句话。"
                 ),
                 HumanMessage(content=desensitized),
-            ]
+            ],
         )
         reply = _extract_text(response)
         return _ok(
@@ -273,11 +275,12 @@ def _handle_simple_report(
             model_kwargs={"max_tokens": config["max_tokens"]},
             timeout=LLM_REQUEST_TIMEOUT,
         )
-        response = llm.invoke(
+        response = safe_llm_invoke(
+            llm,
             [
                 SystemMessage(content=prompt),
                 HumanMessage(content=desensitized),
-            ]
+            ],
         )
         answer = _extract_text(response)
     except Exception:

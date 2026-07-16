@@ -85,6 +85,13 @@ LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "60"))
 # hard 问题（deepseek-reasoner）推理慢，单独放宽
 LLM_REQUEST_TIMEOUT_HARD = float(os.getenv("LLM_REQUEST_TIMEOUT_HARD", "120"))
 
+# -------------------- LLM 重试/熔断配置 --------------------
+LLM_RETRY_MAX_ATTEMPTS = int(os.getenv("LLM_RETRY_MAX_ATTEMPTS", "3"))
+LLM_RETRY_MIN_WAIT = float(os.getenv("LLM_RETRY_MIN_WAIT", "1"))
+LLM_RETRY_MAX_WAIT = float(os.getenv("LLM_RETRY_MAX_WAIT", "8"))
+LLM_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv("LLM_CIRCUIT_FAILURE_THRESHOLD", "5"))
+LLM_CIRCUIT_RECOVERY_SECONDS = int(os.getenv("LLM_CIRCUIT_RECOVERY_SECONDS", "60"))
+
 # -------------------- API 鉴权配置 --------------------
 # 角色层级（集合包含，admin 拥有 service 全部权限；readonly 独立只读）
 # service : 仅可调用 POST /api/v1/message（内部服务/机器人）

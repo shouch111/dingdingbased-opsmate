@@ -21,3 +21,6 @@ cryptography>=42.0.0
 
 # 定时调度（重新提醒功能）
 apscheduler>=3.10.0
+
+# LLM 重试
+ tenacity>=8.0

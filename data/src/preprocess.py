@@ -16,6 +16,7 @@ from .config import (
     LLM_BASE_URL,
     LLM_REQUEST_TIMEOUT,
 )
+from .llm_utils import safe_llm_invoke
 
 import logging
 
@@ -213,11 +214,12 @@ def _llm_detect_intent(text: str) -> tuple[str, float]:
 
 只回复上述一个词，不要其他内容。"""
 
-        response = llm.invoke(
+        response = safe_llm_invoke(
+            llm,
             [
                 SystemMessage(content=prompt),
                 HumanMessage(content=text[:200]),
-            ]
+            ],
         )
         intent = _extract_text(response).strip().lower()
         valid = {
@@ -319,11 +321,12 @@ def _llm_detect_complexity(text: str) -> str:
 
 只回复 simple/medium/hard 一个词。"""
 
-        response = llm.invoke(
+        response = safe_llm_invoke(
+            llm,
             [
                 SystemMessage(content=prompt),
                 HumanMessage(content=text[:200]),
-            ]
+            ],
         )
         result = _extract_text(response).strip().lower()
         if result in ("simple", "medium", "hard"):

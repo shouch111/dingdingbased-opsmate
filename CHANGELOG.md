@@ -1,5 +1,22 @@
 # 更新日志
 
+## [v2.9.0] - 2026-07-16
+
+### 🛡️ 新增 - LLM 重试 + 熔断保护（P1-3）
+- 新增 `llm_utils.py`：统一 LLM 调用入口 `safe_llm_invoke()`
+  - **指数退避重试**：3 次重试（1s/2s/4s），仅对瞬时故障重试（超时/429/5xx/连接错误）
+  - **熔断器**：连续失败 5 次触发熔断，60s 后半开探测，避免对已宕机服务持续重试
+  - **不可重试异常**：400/401/403/参数错误直接失败，不浪费重试
+  - 结构化日志：每次重试/熔断触发/恢复均记录
+- 全项目 9 处 `llm.invoke()` 改为 `safe_llm_invoke()`：
+  - `preprocess.py`（2处）、`router.py`（2处）、`ai_agent.py`（2处）
+  - `postprocess.py`（1处）、`graph.py`（2处）
+- 降级行为复用各调用方现有 except 逻辑，无需新写
+- `config.py` 新增配置：`LLM_RETRY_MAX_ATTEMPTS` / `LLM_RETRY_MIN_WAIT` / `LLM_RETRY_MAX_WAIT` / `LLM_CIRCUIT_FAILURE_THRESHOLD` / `LLM_CIRCUIT_RECOVERY_SECONDS`
+- `requirements.txt` 新增 `tenacity>=8.0`
+
+---
+
 ## [v2.8.0] - 2026-07-16
 
 ### 📝 新增 - 结构化日志系统（P1-1）

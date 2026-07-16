@@ -326,6 +326,15 @@ LLM_REQUEST_TIMEOUT_HARD=120
 
 
 
+# ========== LLM 重试/熔断（可选）==========
+LLM_RETRY_MAX_ATTEMPTS=3        # 最大重试次数（含首次）
+LLM_RETRY_MIN_WAIT=1            # 退避最小等待（秒）
+LLM_RETRY_MAX_WAIT=8            # 退避最大等待（秒）
+LLM_CIRCUIT_FAILURE_THRESHOLD=5 # 连续失败多少次触发熔断
+LLM_CIRCUIT_RECOVERY_SECONDS=60 # 熔断恢复时间（秒）
+
+
+
 # ========== 记忆系统（可选）==========
 
 MEMORY_ENABLED=true
@@ -1019,7 +1028,9 @@ Agent层（ai_agent.py）：按复杂度路由模型，意图注入，单agent+5
 
 |------|------|------|
 
-| **v2.8.0** | 2026-07-16 | 结构化日志系统（log_config + request_id 关联 + 全项目 15 模块 print 替换为 logging） |
+| **v2.9.0** | 2026-07-16 | LLM 重试+熔断保护（safe_llm_invoke 统一入口，指数退避重试+熔断器） |
+
+| v2.8.0 | 2026-07-16 | 结构化日志系统（log_config + request_id 关联 + 全项目 15 模块 print 替换为 logging） |
 
 | v2.7.0 | 2026-07-15 | 难度枚举统一（difficulty 从 easy/hard 改为 simple/medium/hard，与 complexity 一致） |
 

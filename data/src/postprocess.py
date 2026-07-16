@@ -14,6 +14,7 @@ from pydantic import SecretStr
 
 from . import db_manager
 from .config import LLM_API_KEY, LLM_BASE_URL, LLM_REQUEST_TIMEOUT
+from .llm_utils import safe_llm_invoke
 from .preprocess import desensitize
 
 import logging
@@ -183,13 +184,14 @@ AI回答：
 
 只回复一句话摘要，不要其他内容。"""
 
-        response = llm.invoke(
+        response = safe_llm_invoke(
+            llm,
             [
                 SystemMessage(
                     content=prompt.format(query=query[:200], answer=answer[:500])
                 ),
                 HumanMessage(content="请生成摘要"),
-            ]
+            ],
         )
 
         summary = _extract_text(response).strip()
