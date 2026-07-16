@@ -1032,7 +1032,9 @@ Agent层（ai_agent.py）：按复杂度路由模型，意图注入，单agent+5
 
 |------|------|------|
 
-| **v3.2.0** | 2026-07-16 | 依赖版本锁定（requirements.txt 锁定确切版本 + requirements.lock 完整快照） |
+| **v3.3.0** | 2026-07-16 | 向量检索 HNSW 索引（知识库+记忆库，O(n)->O(log n)） |
+
+| v3.2.0 | 2026-07-16 | 依赖版本锁定（requirements.txt 锁定确切版本 + requirements.lock 完整快照） |
 
 | v3.1.0 | 2026-07-16 | DB N+1 查询消除（批量统计+复合索引）+ 反馈身份识别改用 staff_id 优先 |
 

@@ -242,8 +242,9 @@ def init_db():
         conn.commit()
     # 建表
     Base.metadata.create_all(engine)
-    # 创建复合索引（幂等，加速按提交人/工程师查活跃任务的查询）
+    # 创建索引（幂等）
     with engine.connect() as conn:
+        # 复合索引：加速按提交人/工程师查活跃任务的查询
         conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_submitter_status "
@@ -256,8 +257,22 @@ def init_db():
                 "ON tasks (assigned_engineer, status)"
             )
         )
+        # 向量索引：HNSW 近似最近邻，加速知识库和记忆的向量检索
+        # knowledge_docs.embedding 和 memories.embedding 的 cosine_distance 查询
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_knowledge_embedding "
+                "ON knowledge_docs USING hnsw (embedding vector_cosine_ops)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_memories_embedding "
+                "ON memories USING hnsw (embedding vector_cosine_ops)"
+            )
+        )
         conn.commit()
-    logger.info("数据库表已就绪（含 pgvector + 复合索引）")
+    logger.info("数据库表已就绪（含 pgvector + 复合索引 + HNSW 向量索引）")
 
 
 def migrate_engineers_schema():

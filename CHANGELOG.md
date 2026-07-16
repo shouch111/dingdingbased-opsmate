@@ -1,5 +1,16 @@
 # 更新日志
 
+## [v3.3.0] - 2026-07-16
+
+### ⚡ 优化 - 向量检索 HNSW 索引（P2-3）
+- `database.py`：`init_db()` 新增 2 个 HNSW 向量索引
+  - `idx_knowledge_embedding`：知识库 `knowledge_docs.embedding` 向量检索
+  - `idx_memories_embedding`：记忆库 `memories.embedding` 向量检索
+  - 查询从全表暴力计算（O(n)）变为近似最近邻检索（O(log n)）
+  - 当前数据量无感，知识库/记忆增长后延迟不再线性恶化
+
+---
+
 ## [v3.2.0] - 2026-07-16
 
 ### 📦 优化 - 依赖版本锁定（P2-1）
