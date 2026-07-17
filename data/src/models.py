@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -89,18 +88,3 @@ class PreprocessResult(BaseModel):
     intent: str = "report_issue"  # 意图
     intent_confidence: float = 1.0  # 意图置信度
     complexity: str = "simple"  # 复杂度
-
-
-# ==================== 兼容旧 AgentState ====================
-
-
-class AgentState(BaseModel):
-    """工作流内部状态（兼容旧 graph.py，逐步废弃）"""
-
-    task: Optional[Task] = None
-    difficulty: Difficulty | None = None
-    knowledge_context: str = ""
-    final_response: str = ""
-    assigned_engineer: str = ""
-    submitter_id: str = ""  # 提交人钉钉 ID（反馈追踪用）
-    task_no: str = ""  # 任务编号（存库后回填）

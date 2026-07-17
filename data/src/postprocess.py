@@ -15,34 +15,14 @@ from pydantic import SecretStr
 from . import db_manager
 from .config import LLM_API_KEY, LLM_BASE_URL, LLM_REQUEST_TIMEOUT
 from .llm_utils import safe_llm_invoke
+from .utils import extract_text
 from .preprocess import desensitize
 
 import logging
 
 logger = logging.getLogger(__name__)
 
-# ==================== 辅助函数 ====================
-
-
-def _extract_text(response) -> str:
-    """从 LLM 响应中安全提取文本"""
-    content = response.content
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                parts.append(item.get("text", str(item)))
-            else:
-                parts.append(str(item))
-        return "".join(parts)
-    return str(content)
-
-
-# ==================== 后处理主入口 ====================
+# ==================== 后处理主入口 =====================
 
 
 def postprocess(
@@ -207,7 +187,7 @@ AI回答：
             ],
         )
 
-        summary = _extract_text(response).strip()
+        summary = extract_text(response).strip()
         return summary if summary else f"{query[:30]} -> {answer[:30]}"
     except Exception:
         logger.exception("LLM 摘要生成失败")

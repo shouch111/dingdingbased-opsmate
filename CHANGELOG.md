@@ -1,5 +1,33 @@
 # 更新日志
 
+## [v3.4.0] - 2026-07-17
+
+### 🔧 优化 - 代码质量与技术债清理（P3-1a/1b/2/4/7）
+
+**P3-1a 消除重复代码**
+- 新增 `utils.py`：抽取 `extract_text()` 公共函数
+- 5 个文件（router/ai_agent/preprocess/postprocess/graph）的重复实现改为 import
+
+**P3-1b 统一关键词定义**
+- `CASUAL_PATTERNS` / `HARD_KEYWORDS` 统一到 `preprocess.py`（新架构入口）
+- `graph.py` 改为 import，删除重复定义
+- 合并两份列表的并集：`HARD_KEYWORDS` 补充 5 个 graph.py 独有的关键词
+- 修复同一句话走不同路径分类结果不一致的问题
+
+**P3-2 下线旧版 LangGraph**
+- `graph.py`：删除 classify/retrieve/answer/assign 节点 + build_graph + 模块级 agent_app（约 400 行）
+- 保留 assign_engineer / assign_engineer_by_algorithm / 钉钉通知等纯函数
+- `main.py`：删除旧版 /task 接口 + TaskRequest/TaskResponse 模型
+- `models.py`：删除 AgentState（仅旧 graph 用）
+
+**P3-4 LLM API Key 启动校验**
+- `config.py`：LLM_API_KEY 为空时 warning 日志
+
+**P3-7 Prompt 注入防护**
+- `ai_agent.py`：system prompt 新增安全准则（忽略用户指令性内容/角色操纵）
+
+---
+
 ## [v3.3.0] - 2026-07-16
 
 ### ⚡ 优化 - 向量检索 HNSW 索引（P2-3）

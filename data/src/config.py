@@ -32,6 +32,9 @@ else:
 LLM_API_KEY = os.getenv("open_code_go_api", "")
 LLM_BASE_URL = os.getenv("base_url", "https://api.deepseek.com")
 
+if not LLM_API_KEY:
+    logger.warning("LLM_API_KEY 未配置（open_code_go_api），LLM 相关功能将不可用")
+
 # -------------------- 模型路由 --------------------
 # 按复杂度选择模型：simple/medium/hard -> 不同模型
 

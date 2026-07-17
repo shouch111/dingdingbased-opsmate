@@ -17,31 +17,11 @@ from .config import (
     LLM_REQUEST_TIMEOUT,
 )
 from .llm_utils import safe_llm_invoke
+from .utils import extract_text
 
 import logging
 
 logger = logging.getLogger(__name__)
-
-# ==================== 辅助函数 ====================
-
-
-def _extract_text(response) -> str:
-    """从 LLM 响应中安全提取文本"""
-    content = response.content
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                parts.append(item.get("text", str(item)))
-            else:
-                parts.append(str(item))
-        return "".join(parts)
-    return str(content)
-
 
 # ==================== 脱敏规则 ====================
 
@@ -221,7 +201,7 @@ def _llm_detect_intent(text: str) -> tuple[str, float]:
                 HumanMessage(content=text[:200]),
             ],
         )
-        intent = _extract_text(response).strip().lower()
+        intent = extract_text(response).strip().lower()
         valid = {
             "report_issue",
             "casual_chat",
@@ -278,7 +258,7 @@ def _llm_detect_intent_and_complexity(text: str) -> tuple[str, float, str]:
                 HumanMessage(content=text[:200]),
             ],
         )
-        raw = _extract_text(response).strip()
+        raw = extract_text(response).strip()
 
         # 尝试解析 JSON
         import json as _json
@@ -339,6 +319,11 @@ HARD_KEYWORDS = [
     "虚拟化",
     "Linux系统",
     "安全事件",
+    "帮帮忙",
+    "过来看看",
+    "人来看",
+    "需要协助",
+    "帮我处理",
 ]
 
 

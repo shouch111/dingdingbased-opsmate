@@ -1,8 +1,7 @@
 """
-FastAPI 入口 -- 统一 API + 旧版 /task 兼容。
+FastAPI 入口 -- 统一 API。
 
-新架构：POST /api/v1/message 为统一入口（预处理 -> AI -> 后处理）。
-旧版 POST /task 保留兼容。
+POST /api/v1/message 为统一入口（预处理 -> AI -> 后处理）。
 """
 
 import asyncio
@@ -17,7 +16,6 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import Depends, FastAPI
-from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from . import db_manager
@@ -29,7 +27,7 @@ from .database import (
     migrate_engineers_schema,
 )
 from .log_config import gen_request_id, set_request_id, setup_logging
-from .models import AgentState, MessageRequest, MessageResponse, Task
+from .models import MessageRequest, MessageResponse
 
 # 启动时初始化日志系统（最先执行，后续日志走统一格式）
 setup_logging()
@@ -37,22 +35,6 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 api = FastAPI(title="运维任务分配 Agent")
-
-
-# ==================== 旧版数据模型（兼容） ====================
-
-
-class TaskRequest(BaseModel):
-    title: str
-    description: str
-    submitted_by: str
-
-
-class TaskResponse(BaseModel):
-    status: str
-    difficulty: str
-    response: str
-    assigned_to: str | None = None
 
 
 # ==================== 启动初始化 + 数据迁移 ====================
@@ -217,41 +199,6 @@ async def handle_message(req: MessageRequest, role: str = Depends(verify_api_key
         response=response,
         task_no=task_no,
         memory_saved=memory_saved,
-    )
-
-
-# ==================== 旧版接口（兼容保留） ====================
-
-
-@api.post("/task", response_model=TaskResponse)
-async def handle_task(req: TaskRequest, role: str = Depends(verify_api_key)):
-    """旧版接口：接收任务，运行 LangGraph 工作流（兼容保留）。需要 service 角色。"""
-    from .graph import agent_app
-
-    initial_state = AgentState(
-        task=Task(
-            title=req.title,
-            description=req.description,
-            submitted_by=req.submitted_by,
-        ),
-        difficulty=None,
-        knowledge_context="",
-        final_response="",
-        assigned_engineer="",
-    )
-
-    result = await run_in_threadpool(agent_app.invoke, initial_state)
-
-    if result["assigned_engineer"]:
-        status = "assigned"
-    else:
-        status = "auto_answered"
-
-    return TaskResponse(
-        status=status,
-        difficulty=result["difficulty"],
-        response=result["final_response"],
-        assigned_to=result.get("assigned_engineer"),
     )
 
 

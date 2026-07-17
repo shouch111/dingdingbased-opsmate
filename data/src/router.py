@@ -28,30 +28,13 @@ from .config import (
     MODEL_ROUTING,
 )
 from .llm_utils import safe_llm_invoke
+from .utils import extract_text
 
 import logging
 
 logger = logging.getLogger(__name__)
 
 # ==================== 辅助函数 ====================
-
-
-def _extract_text(response) -> str:
-    """从 LLM 响应中安全提取文本"""
-    content = response.content
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                parts.append(item.get("text", str(item)))
-            else:
-                parts.append(str(item))
-        return "".join(parts)
-    return str(content)
 
 
 def _ok(response, model_used="", needs_postprocess=False, intent="", complexity="", assigned_engineer=""):
@@ -147,7 +130,7 @@ def _handle_casual_chat(desensitized: str, intent: str, complexity: str) -> dict
                 HumanMessage(content=desensitized),
             ],
         )
-        reply = _extract_text(response)
+        reply = extract_text(response)
         return _ok(
             reply,
             config["model"],
@@ -282,7 +265,7 @@ def _handle_simple_report(
                 HumanMessage(content=desensitized),
             ],
         )
-        answer = _extract_text(response)
+        answer = extract_text(response)
     except Exception:
         logger.exception("简单报障 LLM 失败")
         answer = "处理出错，请稍后重试或联系 IT 工程师。"
