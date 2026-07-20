@@ -17,7 +17,6 @@ from dingtalk_stream import (
     DingTalkStreamClient,
 )
 from dotenv import load_dotenv
-from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +58,12 @@ class OpsAgentChatbot(AsyncChatbotHandler):
     收到消息后转发给 API，收到响应后回复用户。
     """
 
-    async def process(self, callback_message):
-        """收到钉钉消息 -> 转发给 API -> 回复用户"""
+    def process(self, callback_message):
+        """收到钉钉消息 -> 转发给 API -> 回复用户
+
+        注意：dingtalk-stream 0.24.3 的 AsyncChatbotHandler 在线程池中调用 process，
+        process 必须是同步函数，不要用 async 修饰。
+        """
         incoming_message = ChatbotMessage.from_dict(callback_message.data)
 
         sender_nick = incoming_message.sender_nick or "用户"
@@ -87,22 +90,20 @@ class OpsAgentChatbot(AsyncChatbotHandler):
         logger.info("转发给 API：%s...", question[:80])
 
         # ★ 转发给 API（纯转发，不处理业务）
-        # 用线程池包装同步 requests.post，避免阻塞钉钉事件循环
+        # SDK 已在线程池中调用 process，直接用 requests.post 即可
         try:
             headers = {"X-API-Key": API_KEY_SERVICE} if API_KEY_SERVICE else {}
-            resp = await run_in_threadpool(
-                lambda: requests.post(
-                    API_MESSAGE_URL,
-                    json={
-                        "source": "dingtalk",
-                        "sender_id": bind_id,
-                        "sender_name": sender_nick,
-                        "content": question,
-                        "metadata": {"staff_id": sender_staff_id},
-                    },
-                    headers=headers,
-                    timeout=120,  # LLM 可能需要较长时间
-                )
+            resp = requests.post(
+                API_MESSAGE_URL,
+                json={
+                    "source": "dingtalk",
+                    "sender_id": bind_id,
+                    "sender_name": sender_nick,
+                    "content": question,
+                    "metadata": {"staff_id": sender_staff_id},
+                },
+                headers=headers,
+                timeout=120,  # LLM 可能需要较长时间
             )
             result = resp.json()
             reply = result.get("response", "处理出错，请重试。")
