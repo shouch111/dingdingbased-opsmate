@@ -212,13 +212,13 @@ def create_database_if_not_exists():
     import psycopg2
 
     try:
-        conn = psycopg2.connect(
-            host=PG_HOST,
-            port=int(PG_PORT),
-            user=PG_USER,
-            password=PG_PASSWORD,
-            database="postgres",
+        # 用 DSN 字符串连接（避免密码含中文/特殊字符时的编码问题）
+        dsn = (
+            f"host={PG_HOST} port={int(PG_PORT)} "
+            f"user={PG_USER} password={PG_PASSWORD} "
+            f"dbname=postgres"
         )
+        conn = psycopg2.connect(dsn)
         conn.autocommit = True
         cur = conn.cursor()
         cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (PG_DATABASE,))

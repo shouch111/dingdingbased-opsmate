@@ -16,6 +16,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import Depends, FastAPI
+from contextlib import asynccontextmanager
 from starlette.concurrency import run_in_threadpool
 
 from . import db_manager
@@ -33,8 +34,6 @@ from .models import MessageRequest, MessageResponse
 setup_logging()
 
 logger = logging.getLogger(__name__)
-
-api = FastAPI(title="运维任务分配 Agent")
 
 
 # ==================== 启动初始化 + 数据迁移 ====================
@@ -85,8 +84,8 @@ def migrate_engineers_json_to_db():
         logger.exception("工程师导入失败")
 
 
-@api.on_event("startup")
-def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """应用启动时：建库 -> 建表 -> 迁移工程师数据 -> 启动定时提醒"""
     try:
         create_database_if_not_exists()
@@ -104,8 +103,13 @@ def on_startup():
     except Exception:
         logger.exception("定时提醒启动失败")
 
+    yield
 
-# ==================== 新架构：统一消息入口 ====================
+
+api = FastAPI(title="运维任务分配 Agent", lifespan=lifespan)
+
+
+# ==================== 新架构：统一消息入口 =====================
 
 
 @api.post("/api/v1/message", response_model=MessageResponse)

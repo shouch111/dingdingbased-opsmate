@@ -114,6 +114,9 @@ def setup_logging():
     # 文件 handler（轮转）
     if log_file:
         log_path = Path(log_file)
+        # 相对路径相对于项目根目录解析（DATA_DIR 是 data/，父目录是项目根）
+        if not log_path.is_absolute():
+            log_path = DATA_DIR.parent / log_path
         log_path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.handlers.RotatingFileHandler(
             log_path,
