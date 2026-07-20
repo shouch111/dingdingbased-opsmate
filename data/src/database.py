@@ -18,7 +18,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
-    Enum,
     ForeignKey,
     Integer,
     String,
@@ -123,9 +122,7 @@ class Task(Base):
         String(20), nullable=False, comment="难度（simple/medium/hard，与 complexity 取值统一）"
     )
     status: Mapped[str] = mapped_column(
-        Enum("auto_answered", "assigned", "resolved"),
-        nullable=False,
-        comment="任务状态",
+        String(20), nullable=False, comment="任务状态"
     )
     assigned_engineer: Mapped[str] = mapped_column(
         String(100), default="", comment="分配工程师姓名"
@@ -153,7 +150,7 @@ class Feedback(Base):
         Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
     )
     feedback_type: Mapped[str] = mapped_column(
-        Enum("resolved", "unresolved"), nullable=False, comment="反馈类型"
+        String(20), nullable=False, comment="反馈类型"
     )
     feedback_by: Mapped[str] = mapped_column(
         String(100), nullable=False, comment="反馈人"
