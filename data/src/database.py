@@ -10,6 +10,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 from pgvector.sqlalchemy import Vector
@@ -52,8 +53,9 @@ PG_USER = os.getenv("PG_USER", "postgres")
 PG_PASSWORD = os.getenv("PG_PASSWORD", "")
 PG_DATABASE = os.getenv("PG_DATABASE", "ops_agent")
 
+# 密码用 URL 编码，避免 @:/ 等特殊字符破坏连接字符串
 DATABASE_URL = (
-    f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DATABASE}"
+    f"postgresql+psycopg2://{PG_USER}:{quote_plus(PG_PASSWORD)}@{PG_HOST}:{PG_PORT}/{PG_DATABASE}"
 )
 
 engine = create_engine(
