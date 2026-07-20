@@ -101,6 +101,12 @@ FEEDBACK_UNRESOLVED_KEYWORDS = [
     "还不行",
     "没弄好",
     "还是没好",
+    "还是不可以",
+    "还是不可以的",
+    "还是没有解决",
+    "没解决掉",
+    "不好使",
+    "不管用",
 ]
 
 REQUEST_HUMAN_KEYWORDS = [
@@ -121,6 +127,14 @@ REQUEST_HUMAN_KEYWORDS = [
     "需要人",
     "崩溃",
     "业务中断",
+    "联系IT",
+    "联系一下IT",
+    "帮我联系",
+    "叫人",
+    "叫工程师",
+    "派人来",
+    "找人看看",
+    "找人处理",
 ]
 
 QUERY_STATUS_KEYWORDS = [
@@ -182,7 +196,7 @@ def _llm_detect_intent(text: str) -> tuple[str, float]:
             base_url=LLM_BASE_URL,
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
-            max_tokens=20,
+            max_tokens=100,
             timeout=LLM_REQUEST_TIMEOUT,
         )
         prompt = """判断用户消息的意图，只回复一个词：
@@ -232,7 +246,7 @@ def _llm_detect_intent_and_complexity(text: str) -> tuple[str, float, str]:
             base_url=LLM_BASE_URL,
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
-            max_tokens=30,
+            max_tokens=100,
             timeout=LLM_REQUEST_TIMEOUT,
         )
         prompt = """判断用户消息的意图和复杂度，只回复一个JSON对象，不要其他内容：
