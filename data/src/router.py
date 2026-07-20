@@ -118,7 +118,7 @@ def _handle_casual_chat(desensitized: str, intent: str, complexity: str) -> dict
             base_url=LLM_BASE_URL,
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0.3,
-            model_kwargs={"max_tokens": 200},
+            max_tokens=200,
             timeout=LLM_REQUEST_TIMEOUT,
         )
         response = safe_llm_invoke(
@@ -255,7 +255,7 @@ def _handle_simple_report(
             base_url=LLM_BASE_URL,
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
-            model_kwargs={"max_tokens": config["max_tokens"]},
+            max_tokens=config["max_tokens"],
             timeout=LLM_REQUEST_TIMEOUT,
         )
         response = safe_llm_invoke(

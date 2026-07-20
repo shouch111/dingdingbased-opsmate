@@ -162,7 +162,7 @@ def _generate_summary(query: str, answer: str) -> str:
             base_url=LLM_BASE_URL,
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
-            model_kwargs={"max_tokens": 100},
+            max_tokens=100,
             timeout=LLM_REQUEST_TIMEOUT,
         )
 

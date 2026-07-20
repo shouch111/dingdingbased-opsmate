@@ -48,7 +48,7 @@ def _get_llm(complexity: str) -> ChatOpenAI:
         base_url=LLM_BASE_URL,
         api_key=SecretStr(LLM_API_KEY or ""),
         temperature=config["temperature"],
-        model_kwargs={"max_tokens": config["max_tokens"]},
+        max_tokens=config["max_tokens"],
         timeout=timeout,
     )
 

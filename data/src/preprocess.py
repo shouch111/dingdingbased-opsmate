@@ -181,7 +181,7 @@ def _llm_detect_intent(text: str) -> tuple[str, float]:
             base_url=LLM_BASE_URL,
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
-            model_kwargs={"max_tokens": 20},
+            max_tokens=20,
             timeout=LLM_REQUEST_TIMEOUT,
         )
         prompt = """判断用户消息的意图，只回复一个词：
@@ -231,7 +231,7 @@ def _llm_detect_intent_and_complexity(text: str) -> tuple[str, float, str]:
             base_url=LLM_BASE_URL,
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
-            model_kwargs={"max_tokens": 30},
+            max_tokens=30,
             timeout=LLM_REQUEST_TIMEOUT,
         )
         prompt = """判断用户消息的意图和复杂度，只回复一个JSON对象，不要其他内容：
