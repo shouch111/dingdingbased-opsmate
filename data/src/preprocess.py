@@ -15,6 +15,7 @@ from .config import (
     LLM_API_KEY,
     LLM_BASE_URL,
     LLM_REQUEST_TIMEOUT,
+    MODEL_SIMPLE,
 )
 from .llm_utils import safe_llm_invoke
 from .utils import extract_text
@@ -177,7 +178,7 @@ def _llm_detect_intent(text: str) -> tuple[str, float]:
     """轻量 LLM 意图分类（max_tokens=20，成本极低）"""
     try:
         llm = ChatOpenAI(
-            model="deepseek-chat",
+            model=MODEL_SIMPLE,
             base_url=LLM_BASE_URL,
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
@@ -227,7 +228,7 @@ def _llm_detect_intent_and_complexity(text: str) -> tuple[str, float, str]:
     """
     try:
         llm = ChatOpenAI(
-            model="deepseek-chat",
+            model=MODEL_SIMPLE,
             base_url=LLM_BASE_URL,
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,

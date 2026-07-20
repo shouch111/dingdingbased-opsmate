@@ -13,7 +13,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 from . import db_manager
-from .config import LLM_API_KEY, LLM_BASE_URL, LLM_REQUEST_TIMEOUT
+from .config import LLM_API_KEY, LLM_BASE_URL, LLM_REQUEST_TIMEOUT, MODEL_SIMPLE
 from .llm_utils import safe_llm_invoke
 from .utils import extract_text
 from .preprocess import desensitize
@@ -158,7 +158,7 @@ def _generate_summary(query: str, answer: str) -> str:
     """用 LLM 生成 query+answer 的简短摘要"""
     try:
         llm = ChatOpenAI(
-            model="deepseek-chat",
+            model=MODEL_SIMPLE,
             base_url=LLM_BASE_URL,
             api_key=SecretStr(LLM_API_KEY or ""),
             temperature=0,
