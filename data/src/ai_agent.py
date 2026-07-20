@@ -74,6 +74,24 @@ def _build_system_prompt(intent: str, complexity: str, sender_id: str = "") -> s
     """构建 system prompt（注入意图 + 复杂度 + 工具说明）"""
     intent_desc = INTENT_CONTEXT.get(intent, "用户有 IT 运维问题需要处理。")
 
+    # 当用户要求人工处理时，直接注入工程师名单，避免 AI 不知道候选人
+    engineer_info = ""
+    if intent == "request_human":
+        try:
+            from .tools import load_engineers
+
+            engineers = load_engineers()
+            if engineers:
+                lines = ["## 可用工程师名单"]
+                for e in engineers:
+                    skills = ", ".join(e.get("skills", []))
+                    available = "在岗" if e.get("available", True) else "休假"
+                    lines.append(f"- {e['name']}：擅长 {skills}（{available}）")
+                engineer_info = "\n".join(lines)
+                engineer_info += "\n\n请从上述名单中选择候选人，使用 assign_engineer 工具分配（candidates 参数传姓名逗号分隔）。"
+        except Exception:
+            pass
+
     return f"""你是公司的 IT 运维助手。
 
 ## 当前上下文
@@ -81,6 +99,8 @@ def _build_system_prompt(intent: str, complexity: str, sender_id: str = "") -> s
 - 意图说明：{intent_desc}
 - 问题复杂度：{complexity}
 - 用户标识：{sender_id or "未知"}
+
+{engineer_info}
 
 ## 工作准则
 1. 根据用户问题选择合适的工具解决问题
